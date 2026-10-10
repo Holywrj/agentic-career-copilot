@@ -27,5 +27,6 @@ async def get_current_user(
     token: Annotated[str, Depends(get_bearer_token)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
-    context = await authenticate(token, db, request.app.state.tokens)
+    async with db.begin():
+        context = await authenticate(token, db, request.app.state.tokens)
     return context.user

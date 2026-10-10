@@ -2,15 +2,20 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 from uuid import UUID, uuid4
 
 import jwt
 import pytest
+from fastapi import Depends
 from sqlalchemy import delete, event, func, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import object_session
 
+from career_copilot.auth.dependencies import get_current_user
 from career_copilot.auth.tokens import JWT_AUDIENCE, JWT_ISSUER, hash_token
 from career_copilot.db.models import AuthSession, LocalCredential, User
-from career_copilot.db.session import create_session_factory
+from career_copilot.db.session import create_session_factory, get_session
 
 pytestmark = pytest.mark.database
 PASSWORD = "A private long passphrase 🐍"
@@ -41,6 +46,50 @@ def assert_authentication_required(response):
     assert response.json() == {"detail": "authentication_required"}
     assert response.headers["www-authenticate"] == "Bearer"
     assert response.headers["cache-control"] == "no-store"
+
+
+async def test_authenticated_handler_can_start_write_transaction(
+    auth_client, auth_app, db_engine
+):
+    registered = await register(auth_client)
+    token = await login(auth_client)
+    request_sessions = []
+
+    @auth_app.post("/test/protected-write")
+    async def protected_write(
+        current_user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[AsyncSession, Depends(get_session)],
+    ):
+        # The authenticated ORM object belongs to this exact cached session.
+        assert object_session(current_user) is db.sync_session
+        request_sessions.append(db)
+        assert current_user.id == UUID(registered["id"])
+        assert current_user.status == "active"
+        assert not db.in_transaction()
+        assert db_engine.pool.checkedout() == 0
+
+        # Non-DB work after authentication must not retain a checked-out connection.
+        await asyncio.sleep(0)
+        assert not db.in_transaction()
+        assert db_engine.pool.checkedout() == 0
+
+        async with db.begin():
+            current_user.status = "disabled"
+            await db.flush()
+        assert not db.in_transaction()
+        assert db_engine.pool.checkedout() == 0
+        return {"id": str(current_user.id), "status": current_user.status}
+
+    response = await auth_client.post("/test/protected-write", headers=bearer(token))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"id": registered["id"], "status": "disabled"}
+    assert len(request_sessions) == 1
+    assert not request_sessions[0].in_transaction()
+    assert db_engine.pool.checkedout() == 0
+    async with create_session_factory(db_engine)() as db:
+        persisted = await db.get(User, UUID(registered["id"]))
+        assert persisted.status == "disabled"
+    assert db_engine.pool.checkedout() == 0
 
 
 async def test_register_login_me_and_exact_storage(
