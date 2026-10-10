@@ -231,6 +231,14 @@ Local username/password
 
 See [Authentication API and security](authentication.md) for the exact contract, validation sequence, operational boundaries, and test strategy.
 
+### Frontend Authentication Foundation
+
+The React frontend uses React Router in Declarative mode, a Context/AuthProvider, a small React-independent fetch layer, and plain CSS. `/login` and `/register` are anonymous routes; `/app` is a protected workspace shell. Registration does not establish a Session. Login obtains a temporary credential and calls `/auth/me` before atomically establishing the authenticated User and credential.
+
+JWTs live only in Provider memory. New Provider instances, reloads, and new tabs start anonymous. A local deadline derived from `expires_in` supports UI expiry; it never replaces backend JWT/PostgreSQL validation. Provider-owned authenticated requests coordinate recognized private 401s with route guards, preserve Sessions on infrastructure failures, and use generation checks and cancellation to prevent stale results from affecting a newer Session. Explicit logout clears local state immediately, then attempts server revocation with the captured credential.
+
+The API layer does not import React, own tokens, redirect, or retry POSTs. Auth requests choose their own timeouts; the generic client has no default timeout. Vite rewrites the frontend `/api` path during development, while production requires equivalent reverse-proxy routing. Future private features can add API helpers and server-state management without changing the auth ownership boundary; uploads and streaming should introduce suitable transports when needed. See [frontend authentication](frontend-authentication.md) for behavior and security details.
+
 ### Future Authentication Evolution
 
 OIDC and external identity providers remain a future authentication evolution; no concrete provider has been selected. External identities must use verified issuer/subject mappings rather than email as a permanent identity key. An eventual cookie-based browser flow must explicitly design CSRF protection and `Secure`, `HttpOnly`, and `SameSite` attributes.
