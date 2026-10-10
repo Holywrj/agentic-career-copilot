@@ -9,6 +9,8 @@ from career_copilot.auth.middleware import AuthResponseMiddleware
 from career_copilot.auth.passwords import PasswordService
 from career_copilot.auth.router import router as auth_router
 from career_copilot.auth.tokens import TokenService
+from career_copilot.career_profile.middleware import CareerProfileResponseMiddleware
+from career_copilot.career_profile.router import router as career_profile_router
 from career_copilot.db.session import create_engine, create_session_factory
 from career_copilot.settings import AuthSettings, Settings
 
@@ -37,7 +39,9 @@ def create_app(
 
     application = FastAPI(title="Career Copilot API", lifespan=lifespan)
     application.add_middleware(AuthResponseMiddleware)
+    application.add_middleware(CareerProfileResponseMiddleware)
     application.include_router(auth_router)
+    application.include_router(career_profile_router)
 
     @application.get("/health")
     async def health() -> dict[str, str]:
