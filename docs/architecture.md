@@ -100,6 +100,7 @@ erDiagram
     USERS ||--o{ JOBS : saves
     USERS ||--o{ JOB_ANALYSES : owns
     USERS ||--o{ SESSIONS : authenticates_with
+    USERS ||--o| LOCAL_CREDENTIALS : has
 
     RESUMES o|--o{ RESUMES : supersedes
     RESUMES ||--o{ JOB_ANALYSES : used_by
@@ -112,6 +113,12 @@ erDiagram
         text status
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    LOCAL_CREDENTIALS {
+        uuid user_id PK, FK
+        text password_hash
+        timestamptz created_at
     }
 
     CAREER_PROFILES {
@@ -202,23 +209,35 @@ Ownership checks apply to reads, writes, deletes, downloads, relationships, task
 
 ## Authentication Decision
 
-The current authentication direction is:
+The current authentication implementation is:
 
 ```text
-OIDC authentication
-→ Backend verifies identity
+Local username/password
+→ Argon2id verification
 → Platform User
-→ Server-side Session
-→ HttpOnly Cookie
+→ HS256 JWT Bearer
+→ PostgreSQL AuthSession validation
+→ current_user
 ```
 
-- A browser authentication design based on JWT storage in `localStorage` is not the default approach.
-- ID Tokens, Access Tokens, or JWTs may still be used as part of the OIDC protocol and backend verification flow.
-- Server-side sessions must support expiration, revocation, and logout.
-- CSRF protection and `Secure`, `HttpOnly`, and `SameSite` cookie behavior will be designed as part of the Authentication feature.
-- The concrete OIDC provider has not been selected.
+- Registration creates a User and a separate LocalCredential atomically. Local identity uses `identity_issuer="local"` and a normalized username as `identity_subject`; usernames currently cannot be renamed.
+- Passwords use library-managed Argon2id encoding and salts. Expensive hashing and verification run in threads outside database transactions, with a small concurrency bound and a startup-generated dummy hash for unknown usernames.
+- Login creates an independent server-side Session and signs a JWT identifying its User (`sub`) and Session (`jti`). Only `SHA-256(raw JWT)` is stored in `sessions.token_hash`.
+- JWT ≠ User. JWT ≠ AuthSession. A valid signature alone never authorizes a request: PostgreSQL AuthSession is the single source of truth for session lifecycle and revocation. Authenticated requests also require a current, active User.
+- Application-layer User statuses are `active` and `disabled`; unknown statuses fail closed. Disabling a User rejects login and already-issued tokens on subsequent authentication checks. This increment adds no status CHECK constraint or status-management API.
+- Each login creates a new Session without revoking other sessions. Sessions expire after 30 minutes by default. Logout revokes only the matching session and accepts repeated logout with the same unexpired, matching JWT.
+- Only an explicit `Authorization: Bearer <JWT>` header authenticates requests. Cookies, query parameters, and request bodies do not supply authentication tokens. The current implementation issues no authentication cookie.
+- Browser JWT storage in `localStorage` is not the default approach. Frontend token handling and browser security require a separate design; the current API can be used with an in-memory token, with another login after reload or expiration.
 
-The platform should maintain its own stable User identifier. External identity should be mapped using trusted issuer and subject identifiers rather than treating an email address as a permanent identity key.
+See [Authentication API and security](authentication.md) for the exact contract, validation sequence, operational boundaries, and test strategy.
+
+### Future Authentication Evolution
+
+OIDC and external identity providers remain a future authentication evolution; no concrete provider has been selected. External identities must use verified issuer/subject mappings rather than email as a permanent identity key. An eventual cookie-based browser flow must explicitly design CSRF protection and `Secure`, `HttpOnly`, and `SameSite` attributes.
+
+The current User schema holds only one issuer/subject pair per platform User. It cannot bind both local and Google/GitHub identities to the same User. Supporting multiple identities will require a separate `UserIdentity` migration and explicit account-linking rules. This increment does not create that table or implement OIDC.
+
+The platform User UUID remains the stable ownership identifier across future authentication changes. Local credentials are authentication material, not career data or the platform identity itself.
 
 ## Database Strategy
 
@@ -244,9 +263,9 @@ The initial migration establishes the five core domain tables and the authentica
 
 CareerProfile uses `user_id` as its primary key, so a User can have zero or one Profile. Analysis records retain a Profile revision and input snapshot rather than a foreign key to the mutable current Profile. Jobs require a nonblank JD but may omit title, company, and URL. Resume extraction and analysis output remain nullable until available. JSONB checks enforce basic object/array shape; full business payload schemas will be introduced with parsing and analysis features.
 
-User, Resume, and JobAnalysis records include required text status fields. Their allowed values, defaults, and lifecycle semantics will be defined by the corresponding authentication, resume-processing, and job-analysis feature work; the Database Foundation does not enforce status workflows.
+User, Resume, and JobAnalysis records include required text status fields. Authentication now defines User statuses at the application layer as described above. Resume and JobAnalysis values, defaults, and lifecycle semantics remain for their corresponding feature work; the Database Foundation does not enforce those workflows.
 
-Users, Profiles, Resumes, Jobs, and analyses have creation and update timestamps. SQLAlchemy maintains `updated_at` on updates; raw SQL writers must set it explicitly. Authentication sessions use creation, expiration, and optional revocation timestamps instead. Foreign keys do not automatically cascade deletions; deletion and retention workflows require a later explicit design.
+Users, Profiles, Resumes, Jobs, and analyses have creation and update timestamps. SQLAlchemy maintains `updated_at` on updates; raw SQL writers must set it explicitly. Authentication sessions use creation, expiration, and optional revocation timestamps instead. Migration `0002` adds LocalCredential with only `user_id` (primary key and User foreign key), `password_hash`, and `created_at`. Foreign keys do not automatically cascade deletions; deletion and retention workflows require a later explicit design.
 
 Integration tests require a dedicated database with a name ending in `_test`, distinct from the application database. Tests migrate a generated schema and clean up only that schema. They verify migrations, constraints, async request cleanup, transaction rollback, cancellation, and independent concurrent sessions. These tests prove relationship integrity, not complete API authorization.
 

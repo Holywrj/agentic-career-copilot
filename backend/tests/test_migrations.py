@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import pytest
 from alembic import command
 from conftest import migrate, migration_config
@@ -8,11 +10,85 @@ from sqlalchemy import (
     inspect,
     text,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from career_copilot.db.models import Base
 
 pytestmark = pytest.mark.database
+
+
+async def test_incremental_migration_preserves_existing_users_and_sessions(
+    isolated_engine: AsyncEngine,
+) -> None:
+    user_id, session_id = uuid4(), uuid4()
+    async with isolated_engine.begin() as connection:
+        await connection.run_sync(migrate, "upgrade", "0001")
+        await connection.execute(
+            text(
+                "INSERT INTO users (id, identity_issuer, identity_subject, status) "
+                "VALUES (:id, 'local', 'existing-user', 'active')"
+            ),
+            {"id": user_id},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO sessions (id, user_id, token_hash, expires_at) "
+                "VALUES (:id, :user_id, :hash, now() + interval '30 minutes')"
+            ),
+            {"id": session_id, "user_id": user_id, "hash": "a" * 64},
+        )
+        before = (await connection.execute(text("SELECT * FROM sessions"))).one()
+        await connection.run_sync(migrate, "upgrade", "head")
+        await connection.execute(
+            text(
+                "INSERT INTO local_credentials (user_id, password_hash) "
+                "VALUES (:id, :hash)"
+            ),
+            {"id": user_id, "hash": "migration-test-only"},
+        )
+        assert await connection.scalar(
+            text("SELECT created_at IS NOT NULL FROM local_credentials")
+        )
+        await connection.run_sync(migrate, "downgrade", "0001")
+        assert "local_credentials" not in await connection.run_sync(
+            lambda conn: inspect(conn).get_table_names()
+        )
+        assert (
+            await connection.execute(text("SELECT * FROM sessions"))
+        ).one() == before
+        assert await connection.scalar(text("SELECT id FROM users")) == user_id
+        await connection.run_sync(migrate, "upgrade", "head")
+        assert (
+            await connection.scalar(text("SELECT count(*) FROM local_credentials")) == 0
+        )
+
+
+async def test_local_credentials_primary_foreign_key_and_not_null(db_engine):
+    user_id = uuid4()
+    async with db_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO users (id, identity_issuer, identity_subject, status) "
+                "VALUES (:id, 'local', 'credential-owner', 'active')"
+            ),
+            {"id": user_id},
+        )
+        insert = text(
+            "INSERT INTO local_credentials (user_id, password_hash) VALUES (:id, :hash)"
+        )
+        for parameters in [
+            {"id": uuid4(), "hash": "test-only"},
+            {"id": user_id, "hash": None},
+            {"id": None, "hash": "test-only"},
+        ]:
+            with pytest.raises(IntegrityError):
+                async with connection.begin_nested():
+                    await connection.execute(insert, parameters)
+        await connection.execute(insert, {"id": user_id, "hash": "test-only"})
+        with pytest.raises(IntegrityError):
+            async with connection.begin_nested():
+                await connection.execute(insert, {"id": user_id, "hash": "test-only"})
 
 
 async def test_empty_schema_upgrade_downgrade_upgrade(
@@ -28,7 +104,7 @@ async def test_empty_schema_upgrade_downgrade_upgrade(
         assert set(tables) == set(Base.metadata.tables) | {"alembic_version"}
         assert (
             await connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0001"
+            == "0002"
         )
         await connection.run_sync(migrate, "downgrade", "base")
         assert set(

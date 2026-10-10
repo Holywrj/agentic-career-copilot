@@ -13,7 +13,7 @@ from starlette.requests import Request
 from career_copilot import main
 from career_copilot.db.models import User
 from career_copilot.db.session import create_session_factory, get_session
-from career_copilot.settings import Settings
+from career_copilot.settings import AuthSettings, Settings
 
 pytestmark = pytest.mark.database
 
@@ -21,6 +21,7 @@ pytestmark = pytest.mark.database
 async def test_async_requests_cleanup_and_shutdown(
     db_engine: AsyncEngine,
     test_settings: Settings,
+    auth_settings: AuthSettings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(main, "create_engine", lambda _: db_engine)
@@ -28,7 +29,7 @@ async def test_async_requests_cleanup_and_shutdown(
     event.listen(
         db_engine.sync_engine, "engine_disposed", lambda _: disposed.append(True)
     )
-    app = main.create_app(test_settings)
+    app = main.create_app(test_settings, auth_settings)
     observed_sessions = []
 
     @app.post("/test/transaction/{mode}")

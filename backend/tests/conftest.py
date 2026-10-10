@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import uuid4
 
+import httpx2
 import pytest
 import pytest_asyncio
 from alembic import command
@@ -13,9 +14,16 @@ from sqlalchemy import Connection, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from career_copilot.settings import Settings
+from career_copilot import main
+from career_copilot.settings import AuthSettings, Settings
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def auth_settings() -> AuthSettings:
+    # Deliberately test-only, passed explicitly rather than used as an app default.
+    return AuthSettings(jwt_secret="test-only-signing-key-never-use-in-deployment")
 
 
 def migration_config() -> Config:
@@ -75,3 +83,20 @@ async def db_engine(isolated_engine: AsyncEngine) -> AsyncEngine:
     async with isolated_engine.begin() as connection:
         await connection.run_sync(migrate, "upgrade", "head")
     return isolated_engine
+
+
+@pytest_asyncio.fixture
+async def auth_app(db_engine, test_settings, auth_settings, monkeypatch):
+    monkeypatch.setattr(main, "create_engine", lambda _: db_engine)
+    app = main.create_app(test_settings, auth_settings)
+    async with app.router.lifespan_context(app):
+        yield app
+
+
+@pytest_asyncio.fixture
+async def auth_client(auth_app):
+    transport = httpx2.ASGITransport(app=auth_app, raise_app_exceptions=False)
+    async with httpx2.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        yield client
