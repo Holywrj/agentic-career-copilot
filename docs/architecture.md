@@ -244,7 +244,7 @@ The initial migration establishes the five core domain tables and the authentica
 
 CareerProfile uses `user_id` as its primary key, so a User can have zero or one Profile. Analysis records retain a Profile revision and input snapshot rather than a foreign key to the mutable current Profile. Jobs require a nonblank JD but may omit title, company, and URL. Resume extraction and analysis output remain nullable until available. JSONB checks enforce basic object/array shape; full business payload schemas will be introduced with parsing and analysis features.
 
-Initial status values are `active`/`disabled` for Users, `pending`/`parsing`/`ready`/`failed` for Resumes, and `pending`/`running`/`succeeded`/`failed` for analyses. Successful analyses require a result, its schema version, model identifier, and completion timestamp; failed analyses require a completion timestamp. These values are enforced with CHECK constraints rather than PostgreSQL ENUMs.
+User, Resume, and JobAnalysis records include required text status fields. Their allowed values, defaults, and lifecycle semantics will be defined by the corresponding authentication, resume-processing, and job-analysis feature work; the Database Foundation does not enforce status workflows.
 
 Users, Profiles, Resumes, Jobs, and analyses have creation and update timestamps. SQLAlchemy maintains `updated_at` on updates; raw SQL writers must set it explicitly. Authentication sessions use creation, expiration, and optional revocation timestamps instead. Foreign keys do not automatically cascade deletions; deletion and retention workflows require a later explicit design.
 

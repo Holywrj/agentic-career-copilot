@@ -37,7 +37,11 @@ async def test_async_requests_cleanup_and_shutdown(
         session: Annotated[AsyncSession, Depends(get_session)],
     ) -> dict[str, str]:
         observed_sessions.append(session)
-        user = User(identity_issuer="fixture-issuer", identity_subject=uuid4().hex)
+        user = User(
+            identity_issuer="fixture-issuer",
+            identity_subject=uuid4().hex,
+            status="fixture-user",
+        )
         if mode == "commit":
             async with session.begin():
                 session.add(user)
@@ -79,7 +83,11 @@ async def test_cancelled_work_rolls_back_and_releases_connection(
     async def work() -> None:
         async with asynccontextmanager(get_session)(request) as session:
             session.add(
-                User(identity_issuer="fixture-issuer", identity_subject="cancelled")
+                User(
+                    identity_issuer="fixture-issuer",
+                    identity_subject="cancelled",
+                    status="fixture-user",
+                )
             )
             await session.flush()
             started.set()

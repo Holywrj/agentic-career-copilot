@@ -22,15 +22,12 @@ from career_copilot.db.base import Base, CreatedAt, Timestamps
 
 class User(Timestamps, Base):
     __tablename__ = "users"
-    __table_args__ = (
-        UniqueConstraint("identity_issuer", "identity_subject"),
-        CheckConstraint("status IN ('active', 'disabled')", name="status"),
-    )
+    __table_args__ = (UniqueConstraint("identity_issuer", "identity_subject"),)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     identity_issuer: Mapped[str] = mapped_column(Text)
     identity_subject: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, server_default="active")
+    status: Mapped[str] = mapped_column(Text)
 
 
 class CareerProfile(Timestamps, Base):
@@ -63,10 +60,6 @@ class Resume(Timestamps, Base):
         ),
         CheckConstraint("supersedes_resume_id <> id", name="not_self_version"),
         CheckConstraint(
-            "parsing_status IN ('pending', 'parsing', 'ready', 'failed')",
-            name="parsing_status",
-        ),
-        CheckConstraint(
             "structured_content IS NULL OR jsonb_typeof(structured_content) = 'object'",
             name="structured_content_object",
         ),
@@ -79,7 +72,7 @@ class Resume(Timestamps, Base):
     supersedes_resume_id: Mapped[UUID | None] = mapped_column()
     original_filename: Mapped[str] = mapped_column(Text)
     storage_key: Mapped[str] = mapped_column(Text)
-    parsing_status: Mapped[str] = mapped_column(Text, server_default="pending")
+    parsing_status: Mapped[str] = mapped_column(Text)
     extracted_text: Mapped[str | None] = mapped_column(Text)
     structured_content: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB(none_as_null=True)
@@ -125,18 +118,6 @@ class JobAnalysis(Timestamps, Base):
         CheckConstraint(
             "(result IS NULL) = (result_schema_version IS NULL)", name="result_version"
         ),
-        CheckConstraint(
-            "status IN ('pending', 'running', 'succeeded', 'failed')", name="status"
-        ),
-        CheckConstraint(
-            "status <> 'succeeded' OR (result IS NOT NULL AND "
-            "completed_at IS NOT NULL AND model_identifier IS NOT NULL)",
-            name="success_fields",
-        ),
-        CheckConstraint(
-            "status NOT IN ('succeeded', 'failed') OR completed_at IS NOT NULL",
-            name="terminal_completion",
-        ),
         Index("ix_job_analyses_owner_created", "user_id", "created_at"),
         Index("ix_job_analyses_owner_job_created", "user_id", "job_id", "created_at"),
         Index("ix_job_analyses_owner_resume", "user_id", "resume_id"),
@@ -151,7 +132,7 @@ class JobAnalysis(Timestamps, Base):
     input_schema_version: Mapped[int] = mapped_column()
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     result_schema_version: Mapped[int | None] = mapped_column()
-    status: Mapped[str] = mapped_column(Text, server_default="pending")
+    status: Mapped[str] = mapped_column(Text)
     model_identifier: Mapped[str | None] = mapped_column(Text)
     analysis_version: Mapped[str] = mapped_column(Text)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

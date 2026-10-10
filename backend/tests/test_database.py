@@ -22,7 +22,9 @@ pytestmark = pytest.mark.database
 
 def new_user() -> User:
     return User(
-        identity_issuer="https://identity.example.test", identity_subject=uuid4().hex
+        identity_issuer="https://identity.example.test",
+        identity_subject=uuid4().hex,
+        status="fixture-user",
     )
 
 
@@ -31,7 +33,10 @@ async def sources(session: AsyncSession) -> tuple[User, Resume, Job]:
     session.add(user)
     await session.flush()
     resume = Resume(
-        user_id=user.id, original_filename="resume.pdf", storage_key=uuid4().hex
+        user_id=user.id,
+        original_filename="resume.pdf",
+        storage_key=uuid4().hex,
+        parsing_status="fixture-unparsed",
     )
     job = Job(user_id=user.id, description="Python backend engineer")
     session.add_all([resume, job])
@@ -48,7 +53,7 @@ def analysis(user_id: UUID, resume_id: UUID, job_id: UUID, **values) -> JobAnaly
         input_snapshot={"profile": {"skills": []}, "resume": {}, "job": {}},
         input_schema_version=1,
         analysis_version="fixture-v1",
-        **values,
+        **{"status": "fixture-not-started", **values},
     )
 
 
@@ -73,6 +78,7 @@ async def test_optional_profile_multiple_versions_and_analyses(
                 supersedes_resume_id=resume.id,
                 original_filename="targeted.pdf",
                 storage_key=uuid4().hex,
+                parsing_status="fixture-unparsed",
             )
         )
         session.add_all(
@@ -91,20 +97,31 @@ async def test_identity_unique_and_required_fields(db_engine: AsyncEngine) -> No
             User(
                 identity_issuer=user.identity_issuer,
                 identity_subject=user.identity_subject,
+                status="fixture-user",
             ),
             "23505",
         )
-        await rejected(session, User(identity_issuer=user.identity_issuer), "23502")
+        await rejected(
+            session,
+            User(identity_issuer=user.identity_issuer, status="fixture-user"),
+            "23502",
+        )
         await rejected(
             session,
             User(
-                identity_issuer="issuer", identity_subject="subject", status="unknown"
+                identity_issuer=user.identity_issuer,
+                identity_subject=user.identity_subject,
+                status="fixture-user",
             ),
-            "23514",
+            "23505",
         )
         # The same subject from a different issuer represents a distinct identity.
         session.add(
-            User(identity_issuer="other-issuer", identity_subject=user.identity_subject)
+            User(
+                identity_issuer="other-issuer",
+                identity_subject=user.identity_subject,
+                status="fixture-user",
+            )
         )
 
 
@@ -160,6 +177,7 @@ async def test_version_lineage_is_owned_and_not_self_referential(
                     supersedes_resume_id=previous,
                     original_filename="resume.pdf",
                     storage_key=uuid4().hex,
+                    parsing_status="fixture-unparsed",
                 ),
                 "23503",
             )
@@ -172,18 +190,18 @@ async def test_version_lineage_is_owned_and_not_self_referential(
                 supersedes_resume_id=own_id,
                 original_filename="resume.pdf",
                 storage_key=uuid4().hex,
+                parsing_status="fixture-unparsed",
             ),
             "23514",
         )
 
 
-async def test_analysis_results_and_status_constraints(db_engine: AsyncEngine) -> None:
+async def test_analysis_results_without_status_lifecycle_constraints(
+    db_engine: AsyncEngine,
+) -> None:
     async with create_session_factory(db_engine).begin() as session:
         user, resume, job = await sources(session)
         invalid = [
-            {"status": "unknown"},
-            {"status": "succeeded"},
-            {"status": "failed"},
             {"result": {}, "result_schema_version": None},
             {"result": {}, "result_schema_version": 0},
             {"result": [], "result_schema_version": 1},
@@ -196,11 +214,9 @@ async def test_analysis_results_and_status_constraints(db_engine: AsyncEngine) -
             user.id,
             resume.id,
             job.id,
-            status="succeeded",
+            status="fixture-finished",
             result={},
             result_schema_version=1,
-            model_identifier="fixture-model",
-            completed_at=datetime.now(UTC),
         )
         session.add(record)
         await session.flush()
@@ -272,6 +288,7 @@ async def test_commit_rollback_and_no_partial_writes(db_engine: AsyncEngine) -> 
                 User(
                     identity_issuer=committed.identity_issuer,
                     identity_subject=committed.identity_subject,
+                    status="fixture-user",
                 )
             )
     async with factory() as session:
@@ -312,7 +329,7 @@ async def test_timestamps_and_restrict_delete(db_engine: AsyncEngine) -> None:
         user_id = user.id
     async with factory.begin() as session:
         user = await session.get(User, user_id)
-        user.status = "disabled"
+        user.status = "fixture-updated"
         await session.flush()
         await session.refresh(user)
         assert user.updated_at > previous

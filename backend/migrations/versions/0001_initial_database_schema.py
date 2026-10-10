@@ -22,7 +22,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("identity_issuer", sa.Text(), nullable=False),
         sa.Column("identity_subject", sa.Text(), nullable=False),
-        sa.Column("status", sa.Text(), server_default="active", nullable=False),
+        sa.Column("status", sa.Text(), nullable=False),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
@@ -34,9 +34,6 @@ def upgrade() -> None:
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),
             nullable=False,
-        ),
-        sa.CheckConstraint(
-            "status IN ('active', 'disabled')", name=op.f("ck_users_status")
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_users")),
         sa.UniqueConstraint(
@@ -127,9 +124,7 @@ def upgrade() -> None:
         sa.Column("supersedes_resume_id", sa.Uuid(), nullable=True),
         sa.Column("original_filename", sa.Text(), nullable=False),
         sa.Column("storage_key", sa.Text(), nullable=False),
-        sa.Column(
-            "parsing_status", sa.Text(), server_default="pending", nullable=False
-        ),
+        sa.Column("parsing_status", sa.Text(), nullable=False),
         sa.Column("extracted_text", sa.Text(), nullable=True),
         sa.Column(
             "structured_content",
@@ -147,10 +142,6 @@ def upgrade() -> None:
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),
             nullable=False,
-        ),
-        sa.CheckConstraint(
-            "parsing_status IN ('pending', 'parsing', 'ready', 'failed')",
-            name=op.f("ck_resumes_parsing_status"),
         ),
         sa.CheckConstraint(
             "structured_content IS NULL OR jsonb_typeof(structured_content) = 'object'",
@@ -220,7 +211,7 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("result_schema_version", sa.Integer(), nullable=True),
-        sa.Column("status", sa.Text(), server_default="pending", nullable=False),
+        sa.Column("status", sa.Text(), nullable=False),
         sa.Column("model_identifier", sa.Text(), nullable=True),
         sa.Column("analysis_version", sa.Text(), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
@@ -243,19 +234,6 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "result IS NULL OR jsonb_typeof(result) = 'object'",
             name=op.f("ck_job_analyses_result_object"),
-        ),
-        sa.CheckConstraint(
-            "status <> 'succeeded' OR (result IS NOT NULL AND "
-            "completed_at IS NOT NULL AND model_identifier IS NOT NULL)",
-            name=op.f("ck_job_analyses_success_fields"),
-        ),
-        sa.CheckConstraint(
-            "status IN ('pending', 'running', 'succeeded', 'failed')",
-            name=op.f("ck_job_analyses_status"),
-        ),
-        sa.CheckConstraint(
-            "status NOT IN ('succeeded', 'failed') OR completed_at IS NOT NULL",
-            name=op.f("ck_job_analyses_terminal_completion"),
         ),
         sa.CheckConstraint(
             "(result IS NULL) = (result_schema_version IS NULL)",
