@@ -6,6 +6,7 @@ A full-stack AI career copilot portfolio project, built incrementally.
 
 - [Product](docs/product.md)
 - [Architecture](docs/architecture.md)
+- [Authentication API and security](docs/authentication.md)
 
 ## Backend development
 
@@ -18,6 +19,8 @@ cp .env.example .env
 docker compose --profile test up -d --wait db db-test
 cd backend
 uv sync --locked
+# Generate a signing secret, then set JWT_SECRET in the ignored ../.env file.
+uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 uv run --env-file ../.env alembic upgrade head
 uv run --env-file ../.env uvicorn career_copilot.main:app --reload
 uv run ruff check src tests migrations
@@ -27,11 +30,15 @@ uv run --env-file ../.env pytest
 
 The example credentials are for local development only. Compose binds PostgreSQL to the loopback interface. The development database uses a persistent volume; the separate test database uses temporary storage. `.env` is ignored by Git.
 
-`DATABASE_URL` is required at application startup and must use `postgresql+psycopg://`. Environment variables take precedence over the explicitly loaded env file. The application uses asynchronous Psycopg connections and never creates or migrates tables at startup. `/health` reports application liveness and does not query PostgreSQL.
+`DATABASE_URL` is required at application startup and must use `postgresql+psycopg://`. `JWT_SECRET` is also required, has no default, and must be a strong random ASCII value of at least 32 bytes; never commit the generated secret. `JWT_SESSION_TTL_SECONDS` defaults to `1800` (30 minutes) and accepts integers from 1 to 3600. Environment variables take precedence over the explicitly loaded env file. The application uses asynchronous Psycopg connections and never creates or migrates tables at startup. `/health` reports application liveness and does not query PostgreSQL.
+
+The backend provides JSON registration/login and JWT Bearer authentication backed by PostgreSQL sessions. The [authentication contract](docs/authentication.md) describes the four endpoints, errors, and frontend integration. This increment includes no frontend authentication UI.
 
 `TEST_DATABASE_URL` must name a separate database ending in `_test`. Database tests fail when it is missing or unavailable. Each test creates a random schema through Alembic, then removes only that schema. Do not point this setting at a database containing valuable data.
 
 Migration commands, run from `backend/`:
+
+Alembic requires only database configuration, not `JWT_SECRET`. Migration `0002` adds local credentials; it does not alter the existing User or Session tables. Downgrading to `0001` deletes local password hashes, so upgrading again does not restore login credentials.
 
 ```sh
 uv run --env-file ../.env alembic current

@@ -30,6 +30,13 @@ class User(Timestamps, Base):
     status: Mapped[str] = mapped_column(Text)
 
 
+class LocalCredential(CreatedAt, Base):
+    __tablename__ = "local_credentials"
+
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+
+
 class CareerProfile(Timestamps, Base):
     __tablename__ = "career_profiles"
     __table_args__ = (
