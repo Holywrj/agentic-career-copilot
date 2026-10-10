@@ -8,6 +8,7 @@ A full-stack AI career copilot portfolio project, built incrementally.
 - [Architecture](docs/architecture.md)
 - [Authentication API and security](docs/authentication.md)
 - [Frontend authentication and browser behavior](docs/frontend-authentication.md)
+- [Career Profile API and domain](docs/career-profile.md)
 
 ## Backend development
 
@@ -34,6 +35,8 @@ The example credentials are for local development only. Compose binds PostgreSQL
 `DATABASE_URL` is required at application startup and must use `postgresql+psycopg://`. `JWT_SECRET` is also required, has no default, and must be a strong random ASCII value of at least 32 bytes; never commit the generated secret. `JWT_SESSION_TTL_SECONDS` defaults to `1800` (30 minutes) and accepts integers from 1 to 3600. Environment variables take precedence over the explicitly loaded env file. The application uses asynchronous Psycopg connections and never creates or migrates tables at startup. `/health` reports application liveness and does not query PostgreSQL.
 
 The backend provides JSON registration/login and JWT Bearer authentication backed by PostgreSQL sessions. The [authentication contract](docs/authentication.md) describes the four endpoints, errors, and frontend integration.
+
+Authenticated users can create, read, and replace their current CareerProfile through `POST`, `GET`, and `PUT /career-profile`. Profiles use user-confirmed summary, skill names, and target role names. Writes are owner-scoped and updates require an optimistic `expected_revision`; see the [Career Profile contract](docs/career-profile.md). The existing database schema supports this API without a new migration. Career Profile frontend forms are a later increment.
 
 `TEST_DATABASE_URL` must name a separate database ending in `_test`. Database tests fail when it is missing or unavailable. Each test creates a random schema through Alembic, then removes only that schema. Do not point this setting at a database containing valuable data.
 

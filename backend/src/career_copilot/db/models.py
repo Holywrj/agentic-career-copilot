@@ -50,8 +50,8 @@ class CareerProfile(Timestamps, Base):
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
     revision: Mapped[int] = mapped_column(server_default="1")
     career_summary: Mapped[str | None] = mapped_column(Text)
-    skills: Mapped[list[Any]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
-    target_roles: Mapped[list[Any]] = mapped_column(
+    skills: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    target_roles: Mapped[list[str]] = mapped_column(
         JSONB, server_default=text("'[]'::jsonb")
     )
 
