@@ -7,6 +7,7 @@ A full-stack AI career copilot portfolio project, built incrementally.
 - [Product](docs/product.md)
 - [Architecture](docs/architecture.md)
 - [Authentication API and security](docs/authentication.md)
+- [Frontend authentication and browser behavior](docs/frontend-authentication.md)
 
 ## Backend development
 
@@ -32,7 +33,7 @@ The example credentials are for local development only. Compose binds PostgreSQL
 
 `DATABASE_URL` is required at application startup and must use `postgresql+psycopg://`. `JWT_SECRET` is also required, has no default, and must be a strong random ASCII value of at least 32 bytes; never commit the generated secret. `JWT_SESSION_TTL_SECONDS` defaults to `1800` (30 minutes) and accepts integers from 1 to 3600. Environment variables take precedence over the explicitly loaded env file. The application uses asynchronous Psycopg connections and never creates or migrates tables at startup. `/health` reports application liveness and does not query PostgreSQL.
 
-The backend provides JSON registration/login and JWT Bearer authentication backed by PostgreSQL sessions. The [authentication contract](docs/authentication.md) describes the four endpoints, errors, and frontend integration. This increment includes no frontend authentication UI.
+The backend provides JSON registration/login and JWT Bearer authentication backed by PostgreSQL sessions. The [authentication contract](docs/authentication.md) describes the four endpoints, errors, and frontend integration.
 
 `TEST_DATABASE_URL` must name a separate database ending in `_test`. Database tests fail when it is missing or unavailable. Each test creates a random schema through Alembic, then removes only that schema. Do not point this setting at a database containing valuable data.
 
@@ -64,3 +65,9 @@ npm run lint
 npm run test
 npm run build
 ```
+
+Start the backend in a separate terminal using the backend instructions above (including `alembic upgrade head`). Open the URL printed by Vite, normally `http://localhost:5173`. Registration creates an account; sign in afterward to enter `/app`, the protected workspace shell. Career features are marked as upcoming. The interface defaults to Simplified Chinese; use the browser’s built-in page translation for another language. No in-app language switch or translation service is included.
+
+Frontend requests use relative `/api/*` paths. Vite proxies them to `http://127.0.0.1:8000` and removes `/api`, so `/api/auth/login` reaches backend `/auth/login`. This development model needs no backend CORS configuration. The proxy exists only in development: production hosting must provide the same `/api/*` routing/rewrite over HTTPS and serve `index.html` for frontend deep links, without rewriting API errors to HTML.
+
+JWTs stay in AuthProvider memory. Refreshing, opening a new tab, or reaching the local expiry estimate requires signing in again. There is no token persistence or refresh flow. Explicit sign-out clears the browser immediately even if the server is unavailable; a warning distinguishes local sign-out from unconfirmed server revocation. See [frontend authentication](docs/frontend-authentication.md) for the architecture, failure policies, and testing boundaries.

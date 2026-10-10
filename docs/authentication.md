@@ -57,7 +57,7 @@ Logout validates the same JWT/Session relationship and expiry, locks the matchin
 
 ## Browser and Operational Boundaries
 
-Frontend code sends `Authorization: Bearer <access_token>` for private APIs and logout, handles 401 by ending its authenticated state, and treats 503 as an availability error. There is no refresh token; after expiration the user logs in again. The frontend must clear its token after successful logout. This backend increment supplies no frontend UI, token persistence, CORS policy, or automatic reauthentication.
+Frontend code sends `Authorization: Bearer <access_token>` for private APIs and logout, handles recognized private `401 authentication_required` by ending its authenticated state, and treats 503 as an availability error. There is no refresh token; after expiration the user logs in again. The React frontend uses memory-only tokens and clears local state immediately on explicit logout, even when server revocation cannot be confirmed. See [frontend authentication](frontend-authentication.md) for the browser flow, race protection, failure policy, and development proxy. The backend supplies no token persistence, CORS policy, or automatic reauthentication.
 
 Do not default to JWT storage in `localStorage`. An in-memory token is compatible with this API and is lost on reload; frontend work must explicitly design its browser flow. Bearer headers are not automatically attached by the browser, so the current header-only authentication does not need cookie CSRF protection. XSS can still steal accessible tokens or invoke APIs; frontend XSS protection and HTTPS remain necessary. A future HttpOnly cookie flow requires a new CSRF and cookie-attribute design.
 

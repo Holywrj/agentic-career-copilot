@@ -1,17 +1,25 @@
-import './styles.css'
+import { useEffect } from 'react'
+import { Navigate, Route, Routes, useLocation } from 'react-router'
+import { useAuth } from './auth/AuthContext'
+import { ProtectedRoute, PublicRoute } from './auth/RouteGuards'
+import { LoginPage } from './pages/LoginPage'
+import { RegisterPage } from './pages/RegisterPage'
+import { WorkspacePage } from './pages/WorkspacePage'
+import { NotFoundPage } from './pages/NotFoundPage'
 
-function App() {
-  return (
-    <main className="app-shell">
-      <section className="welcome-card" aria-labelledby="app-title">
-        <p className="eyebrow">Career workspace</p>
-        <h1 id="app-title">Agentic Career Copilot</h1>
-        <p className="description">
-          An AI career assistant, built step by step.
-        </p>
-      </section>
-    </main>
-  )
+export default function App() {
+  const { status } = useAuth()
+  const { pathname } = useLocation()
+  useEffect(() => {
+    const titles: Record<string, string> = { '/login': '登录', '/register': '创建账号', '/app': '工作台' }
+    document.title = `${titles[pathname] ?? '页面未找到'} · Career Copilot`
+    document.getElementById('page-title')?.focus()
+  }, [pathname])
+  return <Routes>
+    <Route path="/" element={<Navigate to={status === 'authenticated' ? '/app' : '/login'} replace />} />
+    <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+    <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+    <Route path="/app" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+    <Route path="*" element={<NotFoundPage />} />
+  </Routes>
 }
-
-export default App
