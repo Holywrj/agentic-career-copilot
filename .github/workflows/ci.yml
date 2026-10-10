@@ -12,6 +12,22 @@ jobs:
   backend:
     name: Backend checks
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: career_copilot
+          POSTGRES_PASSWORD: local-development-only
+          POSTGRES_DB: career_copilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U career_copilot -d career_copilot_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://career_copilot:local-development-only@localhost:5432/career_copilot_test
     defaults:
       run:
         working-directory: backend
@@ -31,10 +47,10 @@ jobs:
         run: uv sync --locked
 
       - name: Lint
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests migrations
 
       - name: Check formatting
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check src tests migrations
 
       - name: Run tests
         run: uv run pytest
