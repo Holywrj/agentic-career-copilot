@@ -2,6 +2,11 @@
 
 A full-stack AI career copilot portfolio project, built incrementally.
 
+## Documentation
+
+- [Product](docs/product.md)
+- [Architecture](docs/architecture.md)
+
 ## Backend development
 
 Requirements: Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
