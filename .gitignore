@@ -1,0 +1,10 @@
+# macOS
+.DS_Store
+
+# JetBrains IDEs
+.idea/
+
+# Local environment files
+.env
+.env.*
+!.env.example
