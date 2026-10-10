@@ -16,3 +16,18 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 uv run pytest
 ```
+
+## Frontend development
+
+Requirements: Node.js 24 or newer and npm.
+
+Run these commands from the repository root:
+
+```sh
+cd frontend
+npm ci
+npm run dev
+npm run lint
+npm run test
+npm run build
+```
