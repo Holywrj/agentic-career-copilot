@@ -6,7 +6,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { AuthProvider } from './auth/AuthProvider'
 import { useAuth } from './auth/AuthContext'
-import { deferred, json, PASSWORD, PROFILE, token, USER_A, USER_B } from './test/fixtures'
+import { deferred, json, PASSWORD, PROFILE, resumeList, token, USER_A, USER_B } from './test/fixtures'
 
 let fetchMock = vi.fn<typeof fetch>()
 beforeEach(() => { fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetchMock) })
@@ -399,9 +399,9 @@ async function openProfile() {
   await screen.findByRole('form', { name: '编辑职业档案' })
 }
 
-test('workspace links to protected profile, keeps three features upcoming, and sets route title/focus', async () => {
+test('workspace links to protected profile, keeps two features upcoming, and sets route title/focus', async () => {
   renderApp('/login', true); await establish()
-  expect(screen.getAllByText('即将推出')).toHaveLength(3)
+  expect(screen.getAllByText('即将推出')).toHaveLength(2)
   expect(screen.getByRole('link', { name: '查看职业档案' }).getAttribute('href')).toBe('/app/profile')
   await openProfile()
   expect(document.title).toBe('职业档案 · Career Copilot')
@@ -410,6 +410,31 @@ test('workspace links to protected profile, keeps three features upcoming, and s
   expect(profileCalls.length).toBeGreaterThan(0)
   for (const [, init] of profileCalls) expect(init?.headers).toHaveProperty('Authorization', 'Bearer token-a')
   expect(screen.getByTestId('location').textContent).toBe('/app/profile:null')
+})
+
+test('Resume route title/focus and transport integrate with Provider; current private 401 ends Session', async () => {
+  renderApp('/login', true); await establish()
+  expect(screen.getAllByText('已开放')).toHaveLength(2)
+  fetchMock.mockImplementation(async () => json(resumeList()))
+  await userEvent.setup().click(screen.getByRole('link', { name: '管理简历' }))
+  const deletion = await screen.findByRole('button', { name: '删除简历 resume.pdf' })
+  expect(document.title).toBe('简历 · Career Copilot')
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '我的简历' }))
+  const reads = fetchMock.mock.calls.filter(([path]) => String(path).startsWith('/api/resumes'))
+  expect(reads.length).toBeGreaterThan(0)
+  for (const [, init] of reads) expect(init?.headers).toHaveProperty('Authorization', 'Bearer token-a')
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  fetchMock.mockResolvedValueOnce(json({ detail: 'authentication_required' }, 401))
+  fireEvent.click(deletion)
+  await screen.findByRole('form', { name: '登录' })
+  expect(screen.getByTestId('auth-state').textContent).toBe('anonymous:none')
+  expect(screen.getByTestId('notice').textContent).toBe('session-ended')
+})
+
+test('anonymous Resume route redirects to login without reading private data', async () => {
+  renderApp('/app/resumes')
+  await screen.findByRole('form', { name: '登录' })
+  expect(fetchMock).not.toHaveBeenCalled()
 })
 
 test.each(['load', 'save', 'reconciliation'])('Profile %s authentication_required ends the real Provider Session and redirects', async (stage) => {

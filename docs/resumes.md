@@ -1,5 +1,9 @@
 # Resume upload and storage
 
+See [Resume frontend](frontend-resumes.md) for `/app/resumes`, confirmed writes,
+uncertain-result recovery and the first-100 list limitation. This document remains
+the backend contract and storage reference.
+
 A Resume is a saved original file resource owned by a platform User. PostgreSQL
 stores metadata; private storage holds binary. Extracted text and AI
 interpretation are separate future outputs. Upload does not parse, run a model,
@@ -178,6 +182,6 @@ write/commit/delete failures, uncertainty, compensation, cancellation, concurren
 deletion, migration preservation/constraints, and model drift. Use README's
 backend validation/migration commands.
 
-Next: frontend management → extraction from saved binary → structured/LLM
+Frontend management is available. Next: extraction from saved binary → structured/LLM
 interpretation. Add an internal read method when extraction needs it. Upload
 never silently changes CareerProfile or historical analysis inputs.
