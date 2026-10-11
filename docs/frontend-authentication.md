@@ -1,6 +1,6 @@
 # Frontend Authentication
 
-This increment provides account creation, sign-in, a protected workspace shell, and sign-out. Career Profile, Resume, Jobs, and Job Analysis cards are explicitly upcoming features, not user data or implemented business flows. The [backend contract](authentication.md) remains authoritative for endpoint and validation semantics.
+The authentication layer provides account creation, sign-in, a protected workspace, and sign-out. Career Profile is now the first integrated business feature; Resume, Jobs, and Job Analysis remain upcoming. The [backend contract](authentication.md) remains authoritative for authentication endpoint and validation semantics. See [Career Profile frontend integration](career-profile.md#frontend-integration) for its draft, revision, and recovery behavior.
 
 ## Architecture
 
@@ -70,7 +70,8 @@ The initial success notice claims only browser sign-out. Failure does not imply 
 | --- | --- | --- |
 | `/` | Replace with `/login` | Replace with `/app` |
 | `/login`, `/register` | Form | Replace with `/app` |
-| `/app` | Replace with `/login` | Workspace shell |
+| `/app` | Replace with `/login` | Workspace with Career Profile entry |
+| `/app/profile` | Replace with `/login` | Career Profile editor |
 | Unknown | Not found, link to sign-in | Not found, link to workspace |
 
 No arbitrary return URL or nested workspace route framework is introduced. React Router runs in Declarative mode.

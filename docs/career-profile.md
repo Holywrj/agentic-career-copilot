@@ -1,4 +1,4 @@
-# Career Profile Backend
+# Career Profile
 
 CareerProfile is the current user's confirmed career background, skills, and direction. It is product data, separate from authentication identity, temporary resume extraction, LLM suggestions, and JobAnalysis results.
 
@@ -118,4 +118,55 @@ There is no PostgreSQL RLS. Current isolation relies on verified authentication,
 
 Tests use the existing dedicated PostgreSQL database and disposable Alembic-built schemas, never SQLite or `create_all()`. They cover lifecycle, auth rejection, normalization, boundaries, strict response data, owner isolation, transaction cleanup, real rollback, safe errors, streaming bounds, OpenAPI, and competing creation/update requests. A deterministic two-session test holds an uncommitted winning CAS, observes the stale writer's real PostgreSQL lock wait, then commits and verifies conflict and final revision 2.
 
-Run the backend validation commands from the [README](../README.md). Existing migration tests retain upgrade/downgrade/upgrade and model-drift checks. The frontend transport can later use `requestAuthenticated()`; its CareerProfile types, error-code mapping, and UI belong to the next PR. This increment adds no AI, parsing, RAG, MCP, taxonomy, history tables, or dependencies.
+Run the backend validation commands from the [README](../README.md). Existing migration tests retain upgrade/downgrade/upgrade and model-drift checks. This API adds no AI, parsing, RAG, MCP, taxonomy, history tables, or dependencies.
+
+## Frontend integration
+
+The protected `/app/profile` route is reachable from the Workspace's Career Profile card. Resume, Jobs, and Job Analysis remain informational upcoming features. The page uses the existing Simplified Chinese UI and CSS tokens, local React state, and the existing App title/heading-focus behavior. No new dependencies or backend changes are required.
+
+`frontend/src/api/careerProfile.ts` accepts `AuthenticatedRequest` rather than importing React or auth Context. GET/POST/PUT use `requestAuthenticated('/career-profile', ...)`, which sends requests through `/api/career-profile` and the existing Vite proxy. Helpers check successful response shape (including positive safe-integer revision, nullable summary, string arrays, and string timestamps) and reject malformed data as `invalid_response`. Profile requests have a 15-second per-request timeout; there is no automatic retry.
+
+### Canonical data and editable draft
+
+The page keeps the last accepted server Profile separate from a copied, editable draft. The textarea represents `null` as an empty string; an empty string is sent as `null`. Editing never mutates canonical arrays. A successful write replaces both canonical Profile and draft with the complete server response, including normalized values and server revision; the client never increments revision.
+
+| State | Frontend behavior |
+| --- | --- |
+| Initial GET pending | Show loading; no editor or write action yet. |
+| GET 200 | Establish canonical Profile and copied draft. |
+| Recognized GET 404 | Normal onboarding; establish an empty draft without a canonical Profile. |
+| Initial GET failure | Safe error and explicit GET retry; unknown 404 is not onboarding. |
+| Onboarding save | POST all three business fields; an explicitly empty Profile can be created. |
+| Existing save | PUT all three business fields and canonical `expected_revision`; never patch or upsert. |
+| No changes to existing Profile | Disable save; comparisons retain list order and exact draft text. |
+| Save pending | Disable editing and use a synchronous controller ref to prevent duplicate submission. |
+| Validated success | Use returned canonical data/revision and announce confirmed save. |
+| 422 / 413 | Preserve draft and show Profile-specific validation/size guidance. |
+| 409 / uncertain write / PUT 404 | Preserve draft, GET latest state, and block save until an explicit user decision. |
+
+Skill/role inputs support Enter to add and labeled buttons to remove; removal returns focus to the input. Unadded list input is preserved, counts as unsaved input, and must be added or cleared before saving, so saving cannot quietly omit it. Basic Unicode code-point/quantity guidance helps users respect summary, skill, and role limits without HTML UTF-16 `maxLength`. The summary count accounts for NFC, line endings, and outer whitespace; final validation and Unicode casefold deduplication remain backend responsibilities. The UI permits duplicate names within raw item limits and accepts server deduplication on success.
+
+### Conflict and uncertain write recovery
+
+A PUT `career_profile_conflict` or POST `career_profile_already_exists` does not retry the write. The draft stays visible while a separate GET loads the latest server Profile. A PUT `career_profile_not_found` also preserves edits and checks current state rather than silently converting the request to a POST.
+
+Network errors, timeouts, unavailable services, unrecognized HTTP errors, and malformed successful write responses all have uncertain outcomes: the server may have received or committed the write. The page immediately attempts a GET for reconciliation and labels the result as current server state, **not evidence that the preceding save succeeded**. A changed or matching revision/content is not an idempotency receipt; another request might have written the same or different values. A GET 404 is only an observation at that moment: an earlier write may still complete afterward.
+
+The recovery panel shows the reason, the untouched editable draft, and all three fields of the latest server Profile (or explicit absence). It offers two actions after a successful GET:
+
+- **Use server state to restart editing:** replace the draft with the displayed server state, confirming before discarding changed draft or unadded inputs.
+- **Keep draft and continue against server state:** adopt the displayed server revision as the new editing baseline, retaining the draft. The UI explicitly says this is not automatic merging and that a later deliberate save replaces **all three** business fields. Selecting this action does not submit anything. A missing Profile becomes an explicit create baseline only after this choice.
+
+Neither action claims that the previous uncertain write succeeded. The user must separately choose to save/create. Further concurrent changes can still produce another conflict; POST remains create-only and PUT remains revision-checked. If reconciliation fails, edits stay available but writes remain blocked; its retry button sends only GET. No automatic merge or POST/PUT retry is implemented.
+
+### Errors, cancellation, and limitations
+
+`api/client.ts` recognizes only allowlisted status/code pairs, including Profile-specific 404/409/503 classifications. `careerProfileErrorMessage()` in the feature API module owns the Chinese Profile error copy; shared 422 classification does not reuse username/password guidance. Raw backend detail, Pydantic payloads, exception text, and proxy HTML never appear in the page.
+
+Recognized private `401 authentication_required` still ends the Session in AuthProvider and redirects via ProtectedRoute. The feature does not duplicate authentication state. Availability/network failures and unrecognized 401 bodies preserve the Session. Cancellation stays silent.
+
+Initial load, writes, and reconciliation pass AbortSignal through the authenticated requester. Controller identity plus abort checks prevent obsolete responses from updating the page after reload, StrictMode cleanup, or unmount; AuthProvider separately guards Session generations. The route keys the page by current User identity so a different account cannot retain another account's draft. Aborting a request cannot undo a server commit.
+
+Refresh/close uses the browser's `beforeunload` prompt when edits, unadded input, a pending write, or recovery state exist. The page's return/home links and logout also confirm before leaving. Browser history back/forward and navigation initiated outside the page are not blocked; browsers may suppress unload prompts. Drafts are not persisted, and Session expiry can still discard them. Refresh/new tabs require login again under the existing memory-only auth design.
+
+API/page tests cover lifecycle, payloads and canonical normalization, raw list bounds, keyboard edits, safe errors, duplicate submission, conflict decisions, uncertain POST/PUT outcomes (including a real request timeout), GET-only recovery retries, and stale/unmounted requests under StrictMode. App integration tests use the real AuthProvider to verify protected routing, title/focus, and 401 behavior during load, save, and reconciliation. Run `npm run lint`, `npm run test`, `npm run build` from `frontend/`, and `git diff --check` from the repository root. DOM tests do not substitute for real proxy/database, visual, or full screen-reader checks.

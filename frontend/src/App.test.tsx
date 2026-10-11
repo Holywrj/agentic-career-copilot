@@ -6,7 +6,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { AuthProvider } from './auth/AuthProvider'
 import { useAuth } from './auth/AuthContext'
-import { deferred, json, PASSWORD, token, USER_A, USER_B } from './test/fixtures'
+import { deferred, json, PASSWORD, PROFILE, token, USER_A, USER_B } from './test/fixtures'
 
 let fetchMock = vi.fn<typeof fetch>()
 beforeEach(() => { fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetchMock) })
@@ -199,7 +199,7 @@ test('does not reject Unicode passwords using UTF-16 maxLength or transform the 
   expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ username: 'alice', password }))
 })
 
-test.each(['/', '/app'])('anonymous %s redirects to login without fetch', async (path) => {
+test.each(['/', '/app', '/app/profile'])('anonymous %s redirects to login without fetch', async (path) => {
   renderApp(path, true)
   expect(await screen.findByRole('form', { name: '登录' })).toBeTruthy()
   expect(screen.getByTestId('location').textContent).toBe('/login:null')
@@ -391,4 +391,53 @@ test('keyboard tab order reaches labeled inputs and submit', async () => {
   expect(document.activeElement).toBe(screen.getByLabelText('密码'))
   await user.tab()
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '登录' }))
+})
+
+async function openProfile() {
+  fetchMock.mockImplementation(async () => json(PROFILE))
+  await userEvent.setup().click(screen.getByRole('link', { name: '查看职业档案' }))
+  await screen.findByRole('form', { name: '编辑职业档案' })
+}
+
+test('workspace links to protected profile, keeps three features upcoming, and sets route title/focus', async () => {
+  renderApp('/login', true); await establish()
+  expect(screen.getAllByText('即将推出')).toHaveLength(3)
+  expect(screen.getByRole('link', { name: '查看职业档案' }).getAttribute('href')).toBe('/app/profile')
+  await openProfile()
+  expect(document.title).toBe('职业档案 · Career Copilot')
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '职业档案' }))
+  const profileCalls = fetchMock.mock.calls.filter(([path]) => path === '/api/career-profile')
+  expect(profileCalls.length).toBeGreaterThan(0)
+  for (const [, init] of profileCalls) expect(init?.headers).toHaveProperty('Authorization', 'Bearer token-a')
+  expect(screen.getByTestId('location').textContent).toBe('/app/profile:null')
+})
+
+test.each(['load', 'save', 'reconciliation'])('Profile %s authentication_required ends the real Provider Session and redirects', async (stage) => {
+  renderApp('/login', true); await establish()
+  if (stage === 'load') {
+    fetchMock.mockImplementation(async () => json({ detail: 'authentication_required' }, 401))
+    await userEvent.setup().click(screen.getByRole('link', { name: '查看职业档案' }))
+  } else {
+    await openProfile()
+    fireEvent.change(screen.getByLabelText('职业概述'), { target: { value: '尚未保存' } })
+    if (stage === 'reconciliation') fetchMock.mockRejectedValueOnce(new TypeError('lost response'))
+    fetchMock.mockImplementationOnce(async () => json({ detail: 'authentication_required' }, 401))
+    fireEvent.submit(screen.getByRole('form', { name: '编辑职业档案' }))
+  }
+  expect(await screen.findByRole('form', { name: '登录' })).toBeTruthy()
+  expect(screen.getByTestId('auth-state').textContent).toBe('anonymous:none')
+  expect(screen.getByTestId('notice').textContent).toBe('session-ended')
+  expect(screen.getByTestId('location').textContent).toBe('/login:null')
+})
+
+test.each([
+  [503, 'career_profile_unavailable', /职业档案服务暂时不可用/],
+  [401, 'unknown private detail', /暂时无法读取职业档案/],
+])('Profile %s failure preserves Session unless authentication_required is recognized', async (status, detail, message) => {
+  renderApp('/login', true); await establish()
+  fetchMock.mockImplementation(async () => json({ detail }, status))
+  await userEvent.setup().click(screen.getByRole('link', { name: '查看职业档案' }))
+  expect(await screen.findByText(message)).toBeTruthy()
+  expect(screen.getByTestId('auth-state').textContent).toBe(`authenticated:${USER_A.id}`)
+  expect(screen.queryByRole('form', { name: '登录' })).toBeNull()
 })

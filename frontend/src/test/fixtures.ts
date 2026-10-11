@@ -2,6 +2,15 @@ export const USER_A = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', status: 'act
 export const USER_B = { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', status: 'active' }
 export const PASSWORD = '  A long private passphrase  '
 
+export const PROFILE = {
+  revision: 3,
+  career_summary: '后端开发者，探索 AI 应用工程。',
+  skills: ['Python', 'FastAPI'],
+  target_roles: ['AI 工程师'],
+  created_at: '2026-10-10T02:00:00Z',
+  updated_at: '2026-10-10T02:15:00+00:00',
+}
+
 export function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
 }
