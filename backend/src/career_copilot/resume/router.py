@@ -13,7 +13,8 @@ from starlette.responses import JSONResponse
 from career_copilot.auth.dependencies import get_current_user
 from career_copilot.db.models import User
 from career_copilot.db.session import get_session
-from career_copilot.resume import service
+from career_copilot.resume import interpretation_service, service
+from career_copilot.resume.interpretation_schemas import ResumeInterpretationResponse
 from career_copilot.resume.schemas import (
     ResumeErrorResponse,
     ResumeListResponse,
@@ -66,6 +67,27 @@ ERRORS = {
 EXTRACTION_ERRORS = {
     **{code: ERRORS[code] for code in (401, 404, 422, 503)},
     409: {"description": "resume_extraction_conflict", "model": ResumeErrorResponse},
+}
+INTERPRETATION_ERRORS = {
+    **{code: ERRORS[code] for code in (401, 422, 503)},
+    404: {
+        "description": "resume_not_found or resume_interpretation_not_found",
+        "model": ResumeErrorResponse,
+    },
+    409: {
+        "description": (
+            "resume_interpretation_not_ready or resume_interpretation_conflict"
+        ),
+        "model": ResumeErrorResponse,
+    },
+    413: {
+        "description": "resume_interpretation_input_too_large",
+        "model": ResumeErrorResponse,
+    },
+}
+INTERPRETATION_ERRORS[503] = {
+    "description": "resume_unavailable or resume_interpretation_unavailable",
+    "model": ResumeErrorResponse,
 }
 
 
@@ -143,3 +165,30 @@ async def delete(
         current_user.id, resume_id, db, request.app.state.resume_storage
     )
     return Response(status_code=204)
+
+
+@router.post(
+    "/{resume_id}/interpret",
+    response_model=ResumeInterpretationResponse,
+    responses=INTERPRETATION_ERRORS,
+)
+async def interpret(
+    resume_id: UUID, request: Request, current_user: CurrentUser, db: Database
+):
+    # No client text, prompt, model, or provider is consumed. Source is DB-only.
+    return await interpretation_service.interpret(
+        current_user.id,
+        resume_id,
+        db,
+        request.app.state.resume_interpreter,
+        request.app.state.resume_interpretation_limiter,
+    )
+
+
+@router.get(
+    "/{resume_id}/interpretation",
+    response_model=ResumeInterpretationResponse,
+    responses=INTERPRETATION_ERRORS,
+)
+async def get_interpretation(resume_id: UUID, current_user: CurrentUser, db: Database):
+    return await interpretation_service.get(current_user.id, resume_id, db)

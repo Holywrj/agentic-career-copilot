@@ -3,6 +3,7 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
@@ -78,3 +79,40 @@ class ResumeSettings:
         if not value or not value.strip():
             raise ValueError("RESUME_STORAGE_DIR is required")
         return cls(storage_dir=Path(value))
+
+
+@dataclass(frozen=True)
+class ResumeInterpretationSettings:
+    """Read lazily by the interpreter; never required for application startup."""
+
+    api_key: str | None = field(default=None, repr=False)
+    base_url: str = field(default="https://api.deepseek.com", repr=False)
+    model_identifier: str = "deepseek-flash"
+
+    def __post_init__(self) -> None:
+        url = urlsplit(self.base_url)
+        if (
+            url.scheme != "https"
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.query
+            or url.fragment
+        ):
+            raise ValueError("Invalid DeepSeek configuration")
+        if (
+            not self.model_identifier.strip()
+            or len(self.model_identifier) > 200
+            or not self.model_identifier.isprintable()
+        ):
+            raise ValueError("Invalid DeepSeek configuration")
+
+    @classmethod
+    def from_env(cls) -> "ResumeInterpretationSettings":
+        return cls(
+            api_key=os.environ.get("DEEPSEEK_API_KEY", "").strip() or None,
+            base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            model_identifier=os.environ.get(
+                "RESUME_INTERPRETATION_MODEL", "deepseek-flash"
+            ),
+        )
