@@ -1,4 +1,4 @@
-# Resume upload, storage, and text extraction
+# Resume upload, storage, extraction, and structured interpretation
 
 See [Resume frontend](frontend-resumes.md) for `/app/resumes`, confirmed writes,
 uncertain-result recovery and the first-100 list limitation. This document remains
@@ -6,7 +6,7 @@ the backend contract and storage reference.
 
 A Resume is a saved original file resource owned by a platform User. PostgreSQL
 stores metadata and extracted source text; private storage holds binary. Explicit
-PDF text extraction is available; structured interpretation is future work.
+PDF text extraction and explicit DeepSeek structured interpretation are available.
 Upload does not parse, run a model, or update CareerProfile. Neither upload nor
 extraction requires an existing CareerProfile.
 
@@ -21,6 +21,8 @@ dependency. Owners come only from `current_user.id`.
 | `GET /resumes` | `limit` 1–100, default 20; `offset` 0–9223372036854775807, default 0 | 200 `{items, limit, offset}` |
 | `GET /resumes/{resume_id}` | UUID | 200 metadata |
 | `POST /resumes/{resume_id}/extract` | UUID; no request body/options in OpenAPI | 200 metadata after extraction attempt or cached result |
+| `POST /resumes/{resume_id}/interpret` | UUID; no request body/options in OpenAPI | 200 validated interpretation or compatible cached result |
+| `GET /resumes/{resume_id}/interpretation` | UUID | 200 validated persisted interpretation |
 | `DELETE /resumes/{resume_id}` | UUID | 204, no body |
 
 List orders by `created_at DESC, id DESC`, without a total count. Concurrent writes
@@ -71,8 +73,8 @@ PDF only: case-insensitive `.pdf`, exact file-part MIME `application/pdf`, and
 leading `%PDF-` signature. Missing MIME and `application/octet-stream` fail.
 These are admission checks, not proof of a complete, extractable, or safe PDF.
 Encrypted/scanned/internally malformed PDFs or active content may still be saved;
-none is executed or publicly served. DOCX, OCR, malware scanning, and structured
-interpretation are deferred. Text extraction is a separate explicit action.
+none is executed or publicly served. DOCX, OCR, and malware scanning are deferred.
+Text extraction and interpretation are separate explicit actions.
 
 Filename spelling is preserved only as metadata, at most 255 UTF-8 bytes.
 Empty/whitespace-only names, exact `.`/`..`, controls/surrogates, NUL, `/`, `\`,
@@ -328,6 +330,198 @@ legacy conflicts, pipeline limits, DB-free parsing, transaction cancellation,
 migration preservation/constraints, and model drift. Use README's
 backend validation/migration commands.
 
-Frontend management and explicit backend text extraction are available. Next:
-extracted text → structured/LLM interpretation. Neither upload nor extraction
-silently changes CareerProfile or historical analysis inputs.
+Frontend management, backend extraction, and backend interpretation are available.
+User review/confirmation and interpretation UI remain future work. No Resume
+action silently changes CareerProfile or historical analysis inputs.
+
+## Explicit structured interpretation
+
+The three independent actions are upload → extract → interpret. pypdf extracts
+machine-readable PDF source text; DeepSeek interprets that persisted text into
+career facts. Interpretation never reads PDF binary or automatically extracts.
+Only `parsing_status="extracted"` with nonblank `extracted_text` is eligible.
+The action has no client input options: like extraction, arbitrary request bodies
+are not consumed, and cannot override source text, prompt, model, or provider.
+GET/list metadata remains unchanged. There is no public extracted-text endpoint.
+
+**Calling interpretation sends the persisted extracted Resume text to the
+configured DeepSeek API for model processing and can incur real API charges.**
+The result is an LLM interpretation, not user-confirmed career truth; review is
+still required before using it as confirmed profile data.
+
+### Configuration and provider boundary
+
+Only these environment variables are used:
+
+```dotenv
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+RESUME_INTERPRETATION_MODEL=deepseek-flash
+```
+
+Keep real keys only in ignored `.env` or deployment Secrets. The existing dataclass
+configuration style is retained. The interpreter loads settings on first use and
+keeps that configuration for its lifetime; restart after changing it. Missing key
+or invalid configuration fails uncached interpretation safely with 503. Application
+startup, authentication, CareerProfile, upload/list/delete, extraction, and GET
+interpretation do not require DeepSeek configuration. A compatible POST cache
+needs the configured model identifier but does not require an API key.
+
+`ResumeInterpreter` accepts text and asynchronously returns `StructuredResumeV1`.
+`DeepSeekResumeInterpreter` implements it using `langchain-openai` ChatOpenAI and
+`langchain-core` messages, pointing explicitly to DeepSeek's OpenAI-compatible API.
+There is no OpenAI model or `OPENAI_API_KEY` configuration. The lock pins
+`langchain-core==1.6.9` and `langchain-openai==1.7.0`.
+
+The implementation uses `with_structured_output(StructuredResumeV1,
+method="function_calling", strict=False, include_raw=False)`. Provider strict
+mode requires DeepSeek's beta endpoint and has schema limitations, so standard
+function output plus application validation is used. `parallel_tool_calls` is
+disabled as an unsupported OpenAI-specific parameter. Thinking is explicitly
+disabled via `extra_body={"thinking": {"type": "disabled"}}`; the Chat Completions
+API is selected explicitly. No business tools are bound or executed. The SDK
+request format and Pydantic parsing are exercised through an offline stub under
+the locked versions. References: [DeepSeek tool calls](https://api-docs.deepseek.com/guides/tool_calls/),
+[thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/), and
+[ChatOpenAI](https://docs.langchain.com/oss/python/integrations/chat/openai).
+
+Code constants set temperature 0, 8192 maximum output tokens, a 60-second SDK
+request timeout, and zero automatic SDK retries. Clients close after each call,
+including on cancellation; there is no detached LLM task or background completion.
+
+### Schema and resource policy
+
+All fields are required; absent facts use null or empty arrays. Every nested model
+is strict and forbids extra keys. Strings retain source wording without trimming,
+rewriting, date normalization, or silent truncation. Empty/whitespace strings,
+NUL and Unicode surrogates are rejected.
+
+| Model | Complete fields |
+| --- | --- |
+| `StructuredResumeV1` | `summary: str\|null`, `skills: str[]`, `experience: ResumeExperience[]`, `education: ResumeEducation[]`, `projects: ResumeProject[]`, `certifications: ResumeCertification[]` |
+| `ResumeExperience` | `job_title`, `company`, `location`, `start_date_text`, `end_date_text` (each `str\|null`); `highlights: str[]` |
+| `ResumeEducation` | `institution`, `degree`, `field_of_study`, `date_text` (each `str\|null`); `highlights: str[]` |
+| `ResumeProject` | `name`, `description` (each `str\|null`); `technologies: str[]`, `highlights: str[]` |
+| `ResumeCertification` | `name`, `issuer`, `date_text` (each `str\|null`) |
+
+| Boundary | Limit |
+| --- | --- |
+| Persisted source sent to model | 32 KiB UTF-8; enough for ordinary short resumes, deliberately below the extraction limit |
+| Names/titles/companies/locations/institutions/degrees/fields/issuers | 200 characters each |
+| Dates, skills, technologies | 100 characters each |
+| Summary/project description | 2000 characters each |
+| Highlight | 1000 characters each; at most 10 highlights per entry |
+| Skills / experience / education / projects / certifications | 100 / 20 / 10 / 20 / 20 entries |
+| Technologies per project | 30 entries |
+| Compact UTF-8 JSON, including persisted envelope | 64 KiB |
+| Model concurrency | 2 per application process |
+
+Pydantic output is revalidated in the service, including already constructed model
+instances. The final envelope is size-checked too. Any malformed/oversized result
+fails the whole interpretation; no truncated prefix or partial success is stored.
+This bounds accepted data, not hard process memory for a misbehaving remote server.
+
+### Prompt and privacy
+
+A fixed system message defines resume text as untrusted data and forbids obeying
+embedded instructions, inventing facts, inferring skills from job titles, filling
+missing facts, or improving achievements. The source is a separate user message;
+it is never interpolated into the system prompt. Contact numbers, home addresses,
+identity documents and unrelated personal details are excluded from the schema
+and prompt. The model has no database access or executable business tools.
+
+Prompt instructions reduce injection/hallucination risk; structural validation
+does not prove factual correctness or guarantee semantic obedience. There is no
+evidence verifier or automatic CareerProfile mutation in V1.
+
+Tracing is explicitly disabled in a scoped `tracing_context(enabled=False,
+parent=False)` even when LangSmith environment switches are present. Callbacks
+are empty; global LangChain debug/verbose mode causes a safe failure rather than
+printing private inputs. SDK loggers are suppressed once at startup, following
+the existing parser logging pattern. LangSmith/OpenAI/httpx/tiktoken and other
+packages may exist as LangChain transitive dependencies; their presence does not
+enable tracing, OpenAI model calls, or tokenization infrastructure.
+
+Application interpretation logs contain only `operation=interpret`, Resume UUID,
+and `model_unavailable`, `invalid_output`, or `db_commit_uncertain`. No raw
+exception, source text, structured JSON, prompt, response, key/token, PDF bytes,
+or storage identity/path is logged or included in errors.
+
+### Persistence, caching, concurrency, and cancellation
+
+The existing nullable JSONB `structured_content` stores this validated envelope:
+
+```json
+{
+  "schema_version": 1,
+  "model_identifier": "deepseek-flash",
+  "source_sha256": "<64 lowercase hex characters>",
+  "content": {
+    "summary": null,
+    "skills": [],
+    "experience": [],
+    "education": [],
+    "projects": [],
+    "certifications": []
+  }
+}
+```
+
+Version and model are application-owned audit metadata. The source digest prevents
+reusing a cached interpretation after a source change. No new columns, tables,
+backfill, or Alembic migration are needed; database head remains `0003`.
+Legacy/malformed/incompatible structured content fails with 409 and is preserved.
+There is no force reinterpret or automatic schema/model migration.
+
+The API returns `{resume_id, schema_version, model_identifier, content}` through
+`ResumeInterpretationResponse`; the envelope is validated before serialization
+and the internal digest is omitted. GET can read valid saved results without
+provider configuration, including after a configured model change. POST reuses
+only current-version, matching-model, matching-source, valid stored results and
+does not call the model or change `updated_at` on a cache hit.
+
+Sequence: authentication ends its transaction → short owner-scoped snapshot
+transaction → release connection → wait for two-token interpretation capacity →
+async DeepSeek call → application validation → cancellation checkpoint → protected
+short transaction → owner-scoped `SELECT FOR UPDATE` → verify storage key, exact
+source text and lifecycle → accept a compatible already-persisted winner or write
+the envelope and `updated_at=clock_timestamp()` → commit.
+
+Capacity/model waits hold no transaction, PostgreSQL connection or row lock.
+Duplicate calls can occur when requests race before a result is accepted. Final
+transactions serialize acceptance and return the first compatible winner instead
+of overwriting it. Changed source/storage/lifecycle returns 409; a deleted row
+returns 404 without resurrection. No persisted `interpreting` status is added;
+successful interpretation retains `parsing_status="extracted"`.
+
+Cancellation during capacity/model waits propagates and discards results. An
+explicit checkpoint after validation observes cancellation before persistence.
+After final transaction handoff, existing `complete()` ownership defers even
+repeated cancellation through commit/rollback and prevents premature session
+close. Cancellation at that point can leave a committed result without a response.
+A lost COMMIT response has an uncertain outcome; no automatic retry is performed.
+Cancelling local HTTP work cannot guarantee the remote provider stops generation
+or charging. The limiter is process-local, not a deployment-wide spend cap.
+
+| Status | Interpretation-specific detail |
+| --- | --- |
+| 404 | `resume_not_found` (missing/other owner), `resume_interpretation_not_found` (eligible Resume has no saved result) |
+| 409 | `resume_interpretation_not_ready` (not extracted/blank), `resume_interpretation_conflict` (changed source/lifecycle or invalid/incompatible existing data) |
+| 413 | `resume_interpretation_input_too_large` |
+| 503 | `resume_interpretation_unavailable` (config/provider/structured validation); existing `resume_unavailable` for database failures |
+
+### Offline validation and cost policy
+
+Every automated test and CI run must make **zero real DeepSeek calls**, require
+no DeepSeek key, and use fakes or local SDK transport stubs. An autouse fixture
+blocks external SDK HTTP transports and requests-based tracing transport for the
+whole suite. Ten focused new tests cover readiness/input size, success/cache/API
+privacy/profile preservation/DB-free model work, authorization, output limits,
+safe provider/config failures, locked SDK payload/prompt/tracing behavior,
+bounded concurrency/first accepted winner, changed source/deletion, cancellation
+before persistence, and final commit ownership. Existing migration tests verify
+the unchanged schema. Use the normal README validation commands.
+
+No real smoke test is necessary for this change. Any later manual paid test must
+state the expected call count before execution and use at most three calls;
+prefer one ordinary Resume. Do not run repeated paid validation loops.

@@ -215,7 +215,7 @@ The first private business API exposes the current User's singleton at `GET /car
 
 Creation starts at revision 1. PUT requires a strict positive `expected_revision` in the body and performs one atomic owner-and-revision-scoped UPDATE, increments revision, and explicitly sets `updated_at=clock_timestamp()`. A stale write returns `409 career_profile_conflict`; duplicate creation returns `409 career_profile_already_exists`. Each operation ends its explicit short transaction before returning, after the authentication dependency has already ended its own transaction. The response is validated inside the business transaction, and write responses are returned only after commit. No ETag protocol, automatic merge, history table, or RLS is introduced. See the [Career Profile contract](career-profile.md) for input normalization, responses, errors, and concurrency behavior.
 
-### Resume upload, storage, and text extraction
+### Resume upload, storage, extraction, and interpretation
 
 Resume metadata remains in PostgreSQL; binary uses a small ResumeStorage boundary
 with private local filesystem storage. Four owner-scoped endpoints provide upload,
@@ -244,8 +244,31 @@ Completed attempts persist `extracted` with nonempty normalized text,
 200 metadata only. Cached successful outcomes skip processing; failed attempts
 allow explicit retry. Protected final transaction ownership defers cancellation
 until commit/rollback ends. Source text stays internal and does not mutate
-CareerProfile, structured content, lineage, or historical analyses. No migration,
-OCR, LLM, provider configuration, or frontend extraction workflow is added.
+CareerProfile, structured content, lineage, or historical analyses. Extraction
+itself requires no OCR, LLM, provider configuration, or frontend workflow.
+
+Two further authenticated endpoints provide explicit structured interpretation:
+`POST /resumes/{resume_id}/interpret` and `GET /resumes/{resume_id}/interpretation`.
+The small `ResumeInterpreter` protocol separates transaction/application logic
+from `DeepSeekResumeInterpreter`, which uses LangChain ChatOpenAI against the
+configured DeepSeek OpenAI-compatible API. Only persisted extracted text is sent
+to the provider; PDF binary stays within the extraction/storage boundary.
+
+Interpretation configuration is lazy and optional for all non-AI functionality.
+A dedicated two-call process-local limiter surrounds the request-owned async
+model call outside database transactions. Fixed system instructions treat Resume
+text as untrusted data; function-based structured output is revalidated against
+strict Pydantic models and field/list/total-size limits. Tracing is disabled and
+SDK content-bearing logs are suppressed. Tests use only fakes/offline HTTP stubs.
+
+After a cancellation checkpoint, a protected final transaction locks the owned
+Resume and rechecks source/storage/lifecycle. The first compatible accepted
+result wins, duplicate POSTs reuse it, and incompatible existing data is preserved
+with a conflict. The existing JSONB holds a typed content envelope with schema
+version, model identifier and source SHA-256; no database migration is needed.
+There is no new parsing status, automatic Profile update, force reinterpret,
+background job, Agent, or LangGraph. The [Resume contract](resumes.md#explicit-structured-interpretation)
+documents privacy disclosure, API/schema, cost controls, and cancellation limits.
 
 ## Authentication Decision
 

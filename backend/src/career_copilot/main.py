@@ -17,6 +17,12 @@ from career_copilot.resume.extraction import (
     EXTRACTION_CONCURRENCY,
     suppress_parser_logging,
 )
+from career_copilot.resume.interpreter import (
+    INTERPRETATION_CONCURRENCY,
+    DeepSeekResumeInterpreter,
+    ResumeInterpreter,
+    suppress_provider_logging,
+)
 from career_copilot.resume.middleware import ResumeResponseMiddleware
 from career_copilot.resume.router import router as resume_router
 from career_copilot.resume.storage import LocalResumeStorage, ResumeStorage, run_io
@@ -28,6 +34,7 @@ def create_app(
     auth_settings: AuthSettings | None = None,
     resume_settings: ResumeSettings | None = None,
     resume_storage: ResumeStorage | None = None,
+    resume_interpreter: ResumeInterpreter | None = None,
 ) -> FastAPI:
     """Create the FastAPI application."""
 
@@ -42,6 +49,15 @@ def create_app(
         application.state.session_factory = create_session_factory(engine)
         try:
             suppress_parser_logging()
+            suppress_provider_logging()
+            application.state.resume_interpreter = (
+                resume_interpreter
+                if resume_interpreter is not None
+                else DeepSeekResumeInterpreter()
+            )
+            application.state.resume_interpretation_limiter = CapacityLimiter(
+                INTERPRETATION_CONCURRENCY
+            )
             application.state.resume_extraction_limiter = CapacityLimiter(
                 EXTRACTION_CONCURRENCY
             )

@@ -6,9 +6,11 @@ from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 import httpx2
 import pytest
 import pytest_asyncio
+import requests
 from alembic import command
 from alembic.config import Config
 from pypdf import PdfWriter
@@ -21,6 +23,18 @@ from career_copilot import main
 from career_copilot.settings import AuthSettings, ResumeSettings, Settings
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def forbid_external_http(monkeypatch):
+    """Every automated test is offline for providers, including tracing SDKs."""
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("External HTTP is forbidden in automated tests; inject a fake/stub")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", forbidden)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", forbidden)
+    monkeypatch.setattr(requests.Session, "request", forbidden)
 
 
 @pytest.fixture
