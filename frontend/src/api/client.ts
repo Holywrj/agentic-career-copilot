@@ -8,6 +8,11 @@ export type ErrorKind =
   | 'career_profile_already_exists'
   | 'career_profile_conflict'
   | 'career_profile_unavailable'
+  | 'resume_not_found'
+  | 'resume_in_use'
+  | 'unsupported_resume_type'
+  | 'resume_storage_unavailable'
+  | 'resume_unavailable'
   | 'network_failure'
   | 'unexpected_server_error'
   | 'invalid_response'
@@ -25,6 +30,11 @@ export type BackendCode =
   | 'career_profile_already_exists'
   | 'career_profile_conflict'
   | 'career_profile_unavailable'
+  | 'resume_not_found'
+  | 'resume_in_use'
+  | 'unsupported_resume_type'
+  | 'resume_storage_unavailable'
+  | 'resume_unavailable'
 
 export class ApiError extends Error {
   readonly kind: ErrorKind
@@ -46,6 +56,7 @@ export interface RequestOptions {
   token?: string
   signal?: AbortSignal
   timeoutMs?: number
+  expectedStatus?: number
 }
 
 export type AuthenticatedRequest = <T = unknown>(
@@ -79,6 +90,11 @@ function httpError(status: number, payload: unknown): ApiError {
   if (status === 409 && detail === 'career_profile_already_exists') return new ApiError('career_profile_already_exists', status, detail)
   if (status === 409 && detail === 'career_profile_conflict') return new ApiError('career_profile_conflict', status, detail)
   if (status === 503 && detail === 'career_profile_unavailable') return new ApiError('career_profile_unavailable', status, detail)
+  if (status === 404 && detail === 'resume_not_found') return new ApiError('resume_not_found', status, detail)
+  if (status === 409 && detail === 'resume_in_use') return new ApiError('resume_in_use', status, detail)
+  if (status === 415 && detail === 'unsupported_resume_type') return new ApiError('unsupported_resume_type', status, detail)
+  if (status === 503 && detail === 'resume_storage_unavailable') return new ApiError('resume_storage_unavailable', status, detail)
+  if (status === 503 && detail === 'resume_unavailable') return new ApiError('resume_unavailable', status, detail)
   return new ApiError('unexpected_server_error', status)
 }
 
@@ -98,16 +114,20 @@ export async function request<T = unknown>(path: string, options: RequestOptions
   try {
     if (options.signal?.aborted) throw new ApiError('cancelled')
     const headers: Record<string, string> = { Accept: 'application/json' }
-    if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+    const multipart = options.body instanceof FormData
+    if (options.body !== undefined && !multipart) headers['Content-Type'] = 'application/json'
     if (options.token) headers.Authorization = `Bearer ${options.token}`
     const response = await fetch(`/api${path}`, {
       method: options.method ?? 'GET',
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: multipart ? options.body as FormData : options.body === undefined ? undefined : JSON.stringify(options.body),
       credentials: 'omit',
       signal: controller.signal,
     })
     if (controller.signal.aborted) throw new ApiError(timedOut ? 'timeout' : 'cancelled')
+    if (response.ok && options.expectedStatus !== undefined && response.status !== options.expectedStatus) {
+      throw new ApiError('invalid_response', response.status)
+    }
     if (response.status === 204 && response.ok) return undefined as T
     const text = await response.text()
     let payload: unknown

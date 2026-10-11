@@ -3,7 +3,6 @@ import { Brand } from '../components/AuthLayout'
 import { Link } from 'react-router'
 
 const upcoming = [
-  ['02', '简历', '整理职业经历，在这里持续完善你的简历。'],
   ['03', '收藏岗位', '收集值得探索的岗位，不错过心仪的机会。'],
   ['04', '岗位分析', '分析岗位匹配度和技能差距，找到有依据的行动方向。'],
 ]
@@ -41,6 +40,12 @@ export function WorkspacePage() {
               <h3>职业档案</h3>
               <p>梳理你的经历、优势与目标，为下一步打好基础。</p>
               <Link className="button secondary" to="/app/profile">查看职业档案</Link>
+            </article>
+            <article className="upcoming-card resume-feature-card">
+              <div className="card-topline"><span className="card-number">02</span><span className="coming-label">已开放</span></div>
+              <h3>简历</h3>
+              <p>上传原始 PDF，管理你的简历文件。</p>
+              <Link className="button secondary" to="/app/resumes">管理简历</Link>
             </article>
             {upcoming.map(([number, title, description]) => (
               <article className="upcoming-card" key={title}>

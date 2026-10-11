@@ -22,6 +22,16 @@ test('sends neither bearer nor content type without explicit token/body', async 
   expect(fetchMock.mock.calls[1][1]?.headers).not.toHaveProperty('Authorization')
 })
 
+test('passes FormData directly with bearer and leaves multipart boundary to the browser', async () => {
+  fetchMock.mockResolvedValue(json({ ok: true }, 201))
+  const form = new FormData()
+  form.append('file', new File(['%PDF-'], 'resume.pdf', { type: 'application/pdf' }))
+  await request('/resumes', { method: 'POST', body: form, token: 'temporary' })
+  const init = fetchMock.mock.calls[0][1]!
+  expect(init.body).toBe(form)
+  expect(init.headers).toEqual({ Accept: 'application/json', Authorization: 'Bearer temporary' })
+})
+
 test('handles empty 204 without parsing JSON', async () => {
   fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
   expect(await request('/auth/logout', { method: 'POST', token: 'temporary' })).toBeUndefined()

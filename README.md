@@ -10,6 +10,7 @@ A full-stack AI career copilot portfolio project, built incrementally.
 - [Frontend authentication and browser behavior](docs/frontend-authentication.md)
 - [Career Profile API and domain](docs/career-profile.md)
 - [Resume upload, storage, and failure semantics](docs/resumes.md)
+- [Resume frontend management and recovery](docs/frontend-resumes.md)
 
 ## Backend development
 
@@ -41,7 +42,7 @@ Resume storage root and its `.tmp` directory require exactly POSIX mode `0700`, 
 
 Authenticated users can create, read, and replace their current CareerProfile through `POST`, `GET`, and `PUT /career-profile`. Profiles use user-confirmed summary, skill names, and target role names. Writes are owner-scoped and updates require an optimistic `expected_revision`; see the [Career Profile contract](docs/career-profile.md). The existing database schema supports this API without a new migration. The frontend editor preserves drafts through conflicts and uncertain write outcomes; see [frontend integration](docs/career-profile.md#frontend-integration).
 
-Authenticated users can upload PDF resumes (5 MiB maximum), list/read their metadata, and delete unreferenced resources through `/resumes`. Binary is stored privately under generated keys, separate from PostgreSQL metadata. Resume management UI and extraction remain upcoming. See the [Resume contract](docs/resumes.md) for admission rules, ownership, compensation, and known crash/commit limitations.
+Authenticated users can upload PDF resumes (5 MiB maximum), list/read their metadata, and delete unreferenced resources through `/resumes`. Binary is stored privately under generated keys, separate from PostgreSQL metadata. The `/app/resumes` management UI is available; extraction remains upcoming. See the [Resume contract](docs/resumes.md) for admission rules, ownership, compensation, and known crash/commit limitations, and [frontend behavior](docs/frontend-resumes.md) for confirmed writes and uncertain-result recovery.
 
 `TEST_DATABASE_URL` must name a separate database ending in `_test`. Database tests fail when it is missing or unavailable. Each test creates a random schema through Alembic, then removes only that schema. Do not point this setting at a database containing valuable data.
 
@@ -74,7 +75,7 @@ npm run test
 npm run build
 ```
 
-Start the backend in a separate terminal using the backend instructions above (including `alembic upgrade head`). Open the URL printed by Vite, normally `http://localhost:5173`. Registration creates an account; sign in afterward to enter `/app`, the protected workspace. Its Career Profile card opens `/app/profile` to create or edit your career summary, skills, and target roles. Resume, Jobs, and Job Analysis remain upcoming. The interface defaults to Simplified Chinese; use the browser’s built-in page translation for another language. No in-app language switch or translation service is included.
+Start the backend in a separate terminal using the backend instructions above (including `alembic upgrade head`). Open the URL printed by Vite, normally `http://localhost:5173`. Registration creates an account; sign in afterward to enter `/app`, the protected workspace. Its Career Profile card opens `/app/profile` to create or edit your career summary, skills, and target roles. The Resume card opens `/app/resumes` to upload PDFs, view the most recent 100 resources, and confirm deletion. Jobs and Job Analysis remain upcoming. The interface defaults to Simplified Chinese; use the browser’s built-in page translation for another language. No in-app language switch or translation service is included.
 
 Frontend requests use relative `/api/*` paths. Vite proxies them to `http://127.0.0.1:8000` and removes `/api`, so `/api/auth/login` reaches backend `/auth/login`. This development model needs no backend CORS configuration. The proxy exists only in development: production hosting must provide the same `/api/*` routing/rewrite over HTTPS and serve `index.html` for frontend deep links, without rewriting API errors to HTML.
 

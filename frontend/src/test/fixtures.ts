@@ -11,6 +11,14 @@ export const PROFILE = {
   updated_at: '2026-10-10T02:15:00+00:00',
 }
 
+export const RESUME = {
+  id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  original_filename: 'resume.pdf', media_type: 'application/pdf', size_bytes: 182734,
+  status: 'uploaded', created_at: '2026-10-11T02:00:00.123456Z', updated_at: '2026-10-11T02:00:00+00:00',
+}
+
+export function resumeList(items: unknown[] = [RESUME]) { return { items, limit: 100, offset: 0 } }
+
 export function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
 }
