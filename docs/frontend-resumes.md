@@ -87,9 +87,13 @@ refresh the list; no DELETE is automatically repeated.
 A successful reconciliation replaces visible items and announces only current
 server list state. Filename/size matches are not upload receipts. An absent item
 is not a delete receipt. Recovery failure keeps old data and selection, blocks
-writes, and offers GET-only retry. After a successful read, deliberate re-upload
-requires confirmation warning that the earlier upload may already exist and a
-new POST can duplicate it. A subsequent delete also requires user confirmation.
+writes, and offers GET-only retry. The page records the uncertain upload's local
+file identity (name, size, lastModified). After a successful read, a selected file
+with that identity, including a newly selected File object, uses retry wording
+and requires confirmation that another POST can duplicate the earlier upload.
+Selecting a different identity keeps the recovery notice but uses ordinary upload
+wording without that confirmation. This identity is a UI heuristic, not a content
+hash or server receipt. A subsequent delete also requires user confirmation.
 GET cannot establish that a still-running earlier request will never complete.
 
 ## Pagination, navigation and accessibility

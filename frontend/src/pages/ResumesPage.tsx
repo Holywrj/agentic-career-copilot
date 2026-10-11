@@ -6,7 +6,7 @@ import { deleteResume, listResumes, resumeErrorMessage, uncertainResumeWrite, up
 import type { Resume } from '../api/resumes'
 import { useAuth } from '../auth/AuthContext'
 import { Brand } from '../components/AuthLayout'
-import { filePreflight, formatResumeDate, formatResumeSize, mergeConfirmedResume, resumeStatus } from './resumePresentation'
+import { filePreflight, formatResumeDate, formatResumeSize, mergeConfirmedResume, resumeStatus, uploadFileIdentity } from './resumePresentation'
 
 type Activity = { kind: 'idle' | 'loading' | 'uploading' | 'refreshing' } | { kind: 'deleting'; id: string }
 type RecoveryReason = 'upload' | 'delete' | 'missing' | 'delete-storage'
@@ -26,6 +26,7 @@ export function ResumesPage() {
   const { requestAuthenticated, logout } = useAuth()
   const [list, setList] = useState<{ items: Resume[] | null; error: string | null }>({ items: null, error: null })
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [retryCandidate, setRetryCandidate] = useState<string | null>(null)
   const [activity, setActivity] = useState<Activity>({ kind: 'loading' })
   const [notice, setNotice] = useState<Notice | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -89,6 +90,7 @@ export function ResumesPage() {
   const canWrite = list.items !== null && !list.error && !recoveryBlocked && !busy
   const selectionError = selectedFile ? filePreflight(selectedFile) : null
   const retryUpload = notice?.kind === 'recovery' && notice.reason === 'upload'
+    && selectedFile !== null && retryCandidate === uploadFileIdentity(selectedFile)
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -97,6 +99,7 @@ export function ResumesPage() {
     const active = begin({ kind: 'uploading' })
     if (!active) return
     setNotice(null)
+    setRetryCandidate(null)
     try {
       const confirmed = await uploadResume(requestAuthenticated, selectedFile, active.signal)
       if (!current(active)) return
@@ -108,7 +111,10 @@ export function ResumesPage() {
       await read(active, { kind: 'confirmed', action: 'upload' })
     } catch (failure) {
       if (!current(active) || (failure instanceof ApiError && failure.kind === 'cancelled')) return
-      if (uncertainResumeWrite(failure)) await recover(active, 'upload', failure instanceof ApiError && failure.status === 503 ? '简历服务暂时不可用，请稍后重试。' : '')
+      if (uncertainResumeWrite(failure)) {
+        setRetryCandidate(uploadFileIdentity(selectedFile))
+        await recover(active, 'upload', failure instanceof ApiError && failure.status === 503 ? '简历服务暂时不可用，请稍后重试。' : '')
+      }
       else setNotice({ kind: 'error', text: failure instanceof ApiError && failure.code === 'invalid_request'
         ? '无法上传这份文件，请确认选择的是有效的 PDF。' : resumeErrorMessage(failure) })
     } finally { finish(active) }

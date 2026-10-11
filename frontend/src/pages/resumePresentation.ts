@@ -1,6 +1,10 @@
 import { MAX_RESUME_BYTES, RESUME_LIST_LIMIT, resumeTimestamp } from '../api/resumes'
 import type { Resume } from '../api/resumes'
 
+export function uploadFileIdentity(file: File): string {
+  return JSON.stringify([file.name, file.size, file.lastModified])
+}
+
 export function filePreflight(file: File): string | null {
   if (!file.name.toLowerCase().endsWith('.pdf')) return '只支持 PDF 文件。'
   if (file.size === 0) return '文件为空，请选择有效的 PDF。'

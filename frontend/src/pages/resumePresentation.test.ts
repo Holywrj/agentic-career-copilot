@@ -1,7 +1,19 @@
 import { expect, test, vi } from 'vitest'
 import { MAX_RESUME_BYTES } from '../api/resumes'
 import { RESUME } from '../test/fixtures'
-import { filePreflight, formatResumeDate, formatResumeSize, mergeConfirmedResume, resumeStatus } from './resumePresentation'
+import { filePreflight, formatResumeDate, formatResumeSize, mergeConfirmedResume, resumeStatus, uploadFileIdentity } from './resumePresentation'
+
+test('upload identity matches separate File objects by name, size and lastModified', () => {
+  const original = new File(['%PDF-1.7'], 'A.pdf', { lastModified: 1000 })
+  const reselected = new File(['%PDF-1.7'], 'A.pdf', { lastModified: 1000, type: 'application/pdf' })
+  expect(reselected).not.toBe(original)
+  expect(uploadFileIdentity(reselected)).toBe(uploadFileIdentity(original))
+  for (const different of [
+    new File(['%PDF-1.7'], 'B.pdf', { lastModified: 1000 }),
+    new File(['%PDF-1.7 extra'], 'A.pdf', { lastModified: 1000 }),
+    new File(['%PDF-1.7'], 'A.pdf', { lastModified: 2000 }),
+  ]) expect(uploadFileIdentity(different)).not.toBe(uploadFileIdentity(original))
+})
 
 test.each([[null, '—'], [0, '0 B'], [1023, '1023 B'], [1024, '1 KB'], [182734, '178 KB'], [MAX_RESUME_BYTES, '5 MB']])('formats %s deterministically', (bytes, expected) => {
   expect(formatResumeSize(bytes as number | null)).toBe(expected)
