@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -60,6 +61,8 @@ class Resume(Timestamps, Base):
     __tablename__ = "resumes"
     __table_args__ = (
         UniqueConstraint("user_id", "id"),
+        UniqueConstraint("storage_key"),
+        CheckConstraint("size_bytes IS NULL OR size_bytes > 0", name="positive_size"),
         ForeignKeyConstraint(
             ["user_id", "supersedes_resume_id"],
             ["resumes.user_id", "resumes.id"],
@@ -79,6 +82,8 @@ class Resume(Timestamps, Base):
     supersedes_resume_id: Mapped[UUID | None] = mapped_column()
     original_filename: Mapped[str] = mapped_column(Text)
     storage_key: Mapped[str] = mapped_column(Text)
+    media_type: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     parsing_status: Mapped[str] = mapped_column(Text)
     extracted_text: Mapped[str | None] = mapped_column(Text)
     structured_content: Mapped[dict[str, Any] | None] = mapped_column(

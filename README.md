@@ -9,6 +9,7 @@ A full-stack AI career copilot portfolio project, built incrementally.
 - [Authentication API and security](docs/authentication.md)
 - [Frontend authentication and browser behavior](docs/frontend-authentication.md)
 - [Career Profile API and domain](docs/career-profile.md)
+- [Resume upload, storage, and failure semantics](docs/resumes.md)
 
 ## Backend development
 
@@ -32,17 +33,21 @@ uv run --env-file ../.env pytest
 
 The example credentials are for local development only. Compose binds PostgreSQL to the loopback interface. The development database uses a persistent volume; the separate test database uses temporary storage. `.env` is ignored by Git.
 
-`DATABASE_URL` is required at application startup and must use `postgresql+psycopg://`. `JWT_SECRET` is also required, has no default, and must be a strong random ASCII value of at least 32 bytes; never commit the generated secret. `JWT_SESSION_TTL_SECONDS` defaults to `1800` (30 minutes) and accepts integers from 1 to 3600. Environment variables take precedence over the explicitly loaded env file. The application uses asynchronous Psycopg connections and never creates or migrates tables at startup. `/health` reports application liveness and does not query PostgreSQL.
+`DATABASE_URL` is required at application startup and must use `postgresql+psycopg://`. `JWT_SECRET` is also required, has no default, and must be a strong random ASCII value of at least 32 bytes; never commit the generated secret. `JWT_SESSION_TTL_SECONDS` defaults to `1800` (30 minutes) and accepts integers from 1 to 3600. `RESUME_STORAGE_DIR` is required and identifies private binary storage; the example `./var/resumes` resolves relative to `backend/` under these commands. Startup creates the directory; uploaded files require persistent disk in deployment. Environment variables take precedence over the explicitly loaded env file. The application uses asynchronous Psycopg connections and never creates or migrates tables at startup. `/health` reports application liveness and does not query PostgreSQL.
 
 The backend provides JSON registration/login and JWT Bearer authentication backed by PostgreSQL sessions. The [authentication contract](docs/authentication.md) describes the four endpoints, errors, and frontend integration.
 
+Resume storage root and its `.tmp` directory require exactly POSIX mode `0700`, including existing directories. Startup and storage operations reject insecure permissions with `resume_storage_unavailable`; they do not chmod operator directories. New storage directories use `0700`, and uploaded files use `0600`.
+
 Authenticated users can create, read, and replace their current CareerProfile through `POST`, `GET`, and `PUT /career-profile`. Profiles use user-confirmed summary, skill names, and target role names. Writes are owner-scoped and updates require an optimistic `expected_revision`; see the [Career Profile contract](docs/career-profile.md). The existing database schema supports this API without a new migration. The frontend editor preserves drafts through conflicts and uncertain write outcomes; see [frontend integration](docs/career-profile.md#frontend-integration).
+
+Authenticated users can upload PDF resumes (5 MiB maximum), list/read their metadata, and delete unreferenced resources through `/resumes`. Binary is stored privately under generated keys, separate from PostgreSQL metadata. Resume management UI and extraction remain upcoming. See the [Resume contract](docs/resumes.md) for admission rules, ownership, compensation, and known crash/commit limitations.
 
 `TEST_DATABASE_URL` must name a separate database ending in `_test`. Database tests fail when it is missing or unavailable. Each test creates a random schema through Alembic, then removes only that schema. Do not point this setting at a database containing valuable data.
 
 Migration commands, run from `backend/`:
 
-Alembic requires only database configuration, not `JWT_SECRET`. Migration `0002` adds local credentials; it does not alter the existing User or Session tables. Downgrading to `0001` deletes local password hashes, so upgrading again does not restore login credentials.
+Alembic requires only database configuration, not `JWT_SECRET` or `RESUME_STORAGE_DIR`. Migration `0003` adds nullable Resume MIME/size metadata and unique storage keys; downgrade loses the new metadata while preserving Resume rows. Migration `0002` adds local credentials; it does not alter the existing User or Session tables. Downgrading to `0001` deletes local password hashes, so upgrading again does not restore login credentials.
 
 ```sh
 uv run --env-file ../.env alembic current

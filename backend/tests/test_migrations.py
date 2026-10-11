@@ -104,7 +104,7 @@ async def test_empty_schema_upgrade_downgrade_upgrade(
         assert set(tables) == set(Base.metadata.tables) | {"alembic_version"}
         assert (
             await connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0002"
+            == "0003"
         )
         await connection.run_sync(migrate, "downgrade", "base")
         assert set(
@@ -177,3 +177,83 @@ async def test_migration_matches_models_and_has_no_rls(db_engine: AsyncEngine) -
             )
         )
         assert enabled == 0
+
+
+async def test_resume_metadata_migration_preserves_legacy_rows(isolated_engine):
+    owner_id, resume_id = uuid4(), uuid4()
+    async with isolated_engine.begin() as connection:
+        await connection.run_sync(migrate, "upgrade", "0002")
+        await connection.execute(
+            text(
+                "INSERT INTO users (id, identity_issuer, identity_subject, status) "
+                "VALUES (:id, 'local', 'legacy-resume-owner', 'active')"
+            ),
+            {"id": owner_id},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO resumes "
+                "(id, user_id, storage_key, original_filename, parsing_status) "
+                "VALUES (:id, :owner, :key, 'legacy.v2.pdf', 'legacy-status')"
+            ),
+            {"id": resume_id, "owner": owner_id, "key": uuid4().hex},
+        )
+        before = (
+            (await connection.execute(text("SELECT * FROM resumes"))).mappings().one()
+        )
+        await connection.run_sync(migrate, "upgrade", "0003")
+        after = (
+            (await connection.execute(text("SELECT * FROM resumes"))).mappings().one()
+        )
+        assert dict(after) == {**before, "media_type": None, "size_bytes": None}
+        await connection.run_sync(migrate, "downgrade", "0002")
+        restored = (
+            (await connection.execute(text("SELECT * FROM resumes"))).mappings().one()
+        )
+        assert dict(restored) == dict(before)
+        await connection.run_sync(migrate, "upgrade", "head")
+
+
+async def test_resume_storage_identity_and_positive_size_constraints(db_engine):
+    owner_a, owner_b, key = uuid4(), uuid4(), uuid4().hex
+    async with db_engine.begin() as connection:
+        for owner in (owner_a, owner_b):
+            await connection.execute(
+                text(
+                    "INSERT INTO users (id, identity_issuer, identity_subject, status) "
+                    "VALUES (:id, 'local', :subject, 'active')"
+                ),
+                {"id": owner, "subject": owner.hex},
+            )
+        insert = text(
+            "INSERT INTO resumes "
+            "(id, user_id, storage_key, original_filename, parsing_status, size_bytes) "
+            "VALUES (:id, :owner, :key, 'resume.pdf', 'uploaded', :size)"
+        )
+        await connection.execute(
+            insert, {"id": uuid4(), "owner": owner_a, "key": key, "size": None}
+        )
+        with pytest.raises(IntegrityError) as error:
+            async with connection.begin_nested():
+                await connection.execute(
+                    insert, {"id": uuid4(), "owner": owner_b, "key": key, "size": 1}
+                )
+        assert error.value.orig.sqlstate == "23505"
+        assert error.value.orig.diag.constraint_name == "uq_resumes_storage_key"
+        for size in (0, -1):
+            with pytest.raises(IntegrityError) as error:
+                async with connection.begin_nested():
+                    await connection.execute(
+                        insert,
+                        {
+                            "id": uuid4(),
+                            "owner": owner_a,
+                            "key": uuid4().hex,
+                            "size": size,
+                        },
+                    )
+            assert error.value.orig.sqlstate == "23514"
+            assert error.value.orig.diag.constraint_name == "ck_resumes_positive_size"
+        await connection.execute(
+            insert, {"id": uuid4(), "owner": owner_b, "key": uuid4().hex, "size": 1}
+        )

@@ -15,9 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from career_copilot import main
-from career_copilot.settings import AuthSettings, Settings
+from career_copilot.settings import AuthSettings, ResumeSettings, Settings
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def resume_settings(tmp_path) -> ResumeSettings:
+    return ResumeSettings(storage_dir=tmp_path / "resumes")
 
 
 @pytest.fixture
@@ -86,9 +91,11 @@ async def db_engine(isolated_engine: AsyncEngine) -> AsyncEngine:
 
 
 @pytest_asyncio.fixture
-async def auth_app(db_engine, test_settings, auth_settings, monkeypatch):
+async def auth_app(
+    db_engine, test_settings, auth_settings, resume_settings, monkeypatch
+):
     monkeypatch.setattr(main, "create_engine", lambda _: db_engine)
-    app = main.create_app(test_settings, auth_settings)
+    app = main.create_app(test_settings, auth_settings, resume_settings)
     async with app.router.lifespan_context(app):
         yield app
 

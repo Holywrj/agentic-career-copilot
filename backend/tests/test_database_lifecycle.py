@@ -22,6 +22,7 @@ async def test_async_requests_cleanup_and_shutdown(
     db_engine: AsyncEngine,
     test_settings: Settings,
     auth_settings: AuthSettings,
+    resume_settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(main, "create_engine", lambda _: db_engine)
@@ -29,7 +30,7 @@ async def test_async_requests_cleanup_and_shutdown(
     event.listen(
         db_engine.sync_engine, "engine_disposed", lambda _: disposed.append(True)
     )
-    app = main.create_app(test_settings, auth_settings)
+    app = main.create_app(test_settings, auth_settings, resume_settings)
     observed_sessions = []
 
     @app.post("/test/transaction/{mode}")

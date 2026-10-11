@@ -4,7 +4,7 @@ import sys
 import pytest
 
 from career_copilot.main import create_app
-from career_copilot.settings import AuthSettings, Settings
+from career_copilot.settings import AuthSettings, ResumeSettings, Settings
 
 
 def test_missing_database_url_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,6 +50,7 @@ def test_import_does_not_load_configuration_or_connect(
 ) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("JWT_SECRET", raising=False)
+    monkeypatch.delenv("RESUME_STORAGE_DIR", raising=False)
     result = subprocess.run(
         [sys.executable, "-c", "import career_copilot.main"],
         capture_output=True,
@@ -100,3 +101,32 @@ async def test_startup_requires_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> N
     with pytest.raises(ValueError, match="JWT_SECRET is required"):
         async with app.router.lifespan_context(app):
             pytest.fail("Startup must reject missing JWT configuration")
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_resume_storage_configuration_required(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("RESUME_STORAGE_DIR", raising=False)
+    else:
+        monkeypatch.setenv("RESUME_STORAGE_DIR", value)
+    with pytest.raises(ValueError, match="RESUME_STORAGE_DIR is required"):
+        ResumeSettings.from_env()
+
+
+def test_resume_storage_configuration_is_explicit_and_private(monkeypatch, tmp_path):
+    root = tmp_path / "private-resumes"
+    monkeypatch.setenv("RESUME_STORAGE_DIR", str(root))
+    configured = ResumeSettings.from_env()
+    assert configured.storage_dir == root
+    assert str(root) not in repr(configured)
+    assert not root.exists()
+
+
+async def test_startup_requires_resume_storage(monkeypatch, auth_settings):
+    monkeypatch.delenv("RESUME_STORAGE_DIR", raising=False)
+    app = create_app(
+        Settings.from_url("postgresql+psycopg://localhost/health_test"), auth_settings
+    )
+    with pytest.raises(ValueError, match="RESUME_STORAGE_DIR is required"):
+        async with app.router.lifespan_context(app):
+            pytest.fail("Startup must reject missing storage configuration")
