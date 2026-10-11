@@ -6,12 +6,13 @@ from uuid import UUID, uuid4
 
 import anyio
 from fastapi import HTTPException
-from sqlalchemy import delete, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
 from career_copilot.db.models import Resume
+from career_copilot.resume import extraction
 from career_copilot.resume.schemas import ResumeListResponse, ResumeResponse
 from career_copilot.resume.storage import ResumeStorage, StorageUnavailable, complete
 from career_copilot.resume.uploads import MAX_RESUME_BYTES, PDF_MEDIA_TYPE, pdf_chunks
@@ -28,6 +29,119 @@ COLUMNS = (
     TABLE.c.updated_at,
 )
 DELETE_REFERENCES = {"fk_resumes_owner_previous", "fk_job_analyses_owner_resume"}
+EXTRACTION_COLUMNS = (*COLUMNS, TABLE.c.storage_key, TABLE.c.extracted_text)
+
+
+def cached_extraction(row) -> bool:
+    status, text = row["status"], row["extracted_text"]
+    if status == "extracted" and text is not None and text.strip():
+        return True
+    if status == "text_unavailable" and text is None:
+        return True
+    if status in {"uploaded", "extraction_failed"} and text is None:
+        return False
+    raise HTTPException(409, "resume_extraction_conflict")
+
+
+def extraction_metadata(row) -> ResumeResponse:
+    return ResumeResponse.model_validate(
+        {column.key: row[column.key] for column in COLUMNS}
+    )
+
+
+async def extract(
+    owner_id: UUID,
+    resume_id: UUID,
+    db: AsyncSession,
+    storage: ResumeStorage,
+    limiter: anyio.CapacityLimiter,
+) -> ResumeResponse:
+    async with db.begin():
+        result = await db.execute(
+            select(*EXTRACTION_COLUMNS).where(
+                TABLE.c.user_id == owner_id, TABLE.c.id == resume_id
+            )
+        )
+        snapshot = result.mappings().one_or_none()
+        if snapshot is None:
+            raise HTTPException(404, "resume_not_found")
+        if cached_extraction(snapshot):
+            return extraction_metadata(snapshot)
+
+    try:
+        # Bound complete read/parse pipelines, not only executing parser threads.
+        # Waiting requests hold neither binary bytes nor a database connection.
+        async with limiter:
+            binary = await storage.read(snapshot["storage_key"], MAX_RESUME_BYTES)
+            if (
+                snapshot["size_bytes"] is not None
+                and len(binary) != snapshot["size_bytes"]
+            ):
+                raise StorageUnavailable()
+            outcome = await extraction.parse_binary(binary)
+            # Do not retain input while waiting for the final database row lock.
+            del binary
+    except StorageUnavailable:
+        # A racing DELETE may have removed metadata as well as binary. This
+        # short read never repairs metadata or changes the extraction lifecycle.
+        await get(owner_id, resume_id, db)
+        logger.warning(
+            "operation=extract resume_id=%s reason=storage_unavailable", resume_id
+        )
+        raise StorageUnavailable() from None
+
+    await anyio.lowlevel.checkpoint()
+
+    async def persist_and_finish() -> ResumeResponse:
+        committing = False
+        try:
+            async with db.begin():
+                result = await db.execute(
+                    select(*EXTRACTION_COLUMNS)
+                    .where(TABLE.c.user_id == owner_id, TABLE.c.id == resume_id)
+                    .with_for_update()
+                )
+                row = result.mappings().one_or_none()
+                if row is None:
+                    raise HTTPException(404, "resume_not_found")
+                if row["storage_key"] != snapshot["storage_key"]:
+                    raise HTTPException(409, "resume_extraction_conflict")
+                if cached_extraction(row):
+                    return extraction_metadata(row)
+                result = await db.execute(
+                    update(TABLE)
+                    .where(
+                        TABLE.c.user_id == owner_id,
+                        TABLE.c.id == resume_id,
+                        TABLE.c.storage_key == snapshot["storage_key"],
+                    )
+                    .values(
+                        parsing_status=outcome.status,
+                        extracted_text=outcome.text,
+                        updated_at=func.clock_timestamp(),
+                    )
+                    .returning(*COLUMNS)
+                )
+                response = ResumeResponse.model_validate(dict(result.mappings().one()))
+                committing = True
+            if outcome.reason is not None:
+                logger.info(
+                    "operation=extract resume_id=%s reason=%s",
+                    resume_id,
+                    outcome.reason,
+                )
+            return response
+        except SQLAlchemyError as error:
+            if committing and not isinstance(error, IntegrityError):
+                logger.error(
+                    "operation=extract resume_id=%s reason=db_commit_uncertain",
+                    resume_id,
+                )
+            raise
+
+    # Sole ownership of the session belongs to this child through transaction
+    # exit. Cancellation cannot close the request session midway through commit.
+    return await complete(persist_and_finish())
 
 
 async def create(

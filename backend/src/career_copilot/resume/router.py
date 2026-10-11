@@ -63,6 +63,10 @@ ERRORS = {
         503: "resume_unavailable or resume_storage_unavailable",
     }.items()
 }
+EXTRACTION_ERRORS = {
+    **{code: ERRORS[code] for code in (401, 404, 422, 503)},
+    409: {"description": "resume_extraction_conflict", "model": ResumeErrorResponse},
+}
 
 
 @router.post(
@@ -113,6 +117,22 @@ async def list_resumes(
 @router.get("/{resume_id}", response_model=ResumeResponse, responses=ERRORS)
 async def get(resume_id: UUID, current_user: CurrentUser, db: Database):
     return await service.get(current_user.id, resume_id, db)
+
+
+@router.post(
+    "/{resume_id}/extract", response_model=ResumeResponse, responses=EXTRACTION_ERRORS
+)
+async def extract(
+    resume_id: UUID, request: Request, current_user: CurrentUser, db: Database
+):
+    # No body dependency or body consumption: this action has no input options.
+    return await service.extract(
+        current_user.id,
+        resume_id,
+        db,
+        request.app.state.resume_storage,
+        request.app.state.resume_extraction_limiter,
+    )
 
 
 @router.delete("/{resume_id}", status_code=204, responses=ERRORS)

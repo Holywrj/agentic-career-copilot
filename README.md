@@ -9,7 +9,7 @@ A full-stack AI career copilot portfolio project, built incrementally.
 - [Authentication API and security](docs/authentication.md)
 - [Frontend authentication and browser behavior](docs/frontend-authentication.md)
 - [Career Profile API and domain](docs/career-profile.md)
-- [Resume upload, storage, and failure semantics](docs/resumes.md)
+- [Resume upload, storage, extraction, and failure semantics](docs/resumes.md)
 - [Resume frontend management and recovery](docs/frontend-resumes.md)
 
 ## Backend development
@@ -42,7 +42,7 @@ Resume storage root and its `.tmp` directory require exactly POSIX mode `0700`, 
 
 Authenticated users can create, read, and replace their current CareerProfile through `POST`, `GET`, and `PUT /career-profile`. Profiles use user-confirmed summary, skill names, and target role names. Writes are owner-scoped and updates require an optimistic `expected_revision`; see the [Career Profile contract](docs/career-profile.md). The existing database schema supports this API without a new migration. The frontend editor preserves drafts through conflicts and uncertain write outcomes; see [frontend integration](docs/career-profile.md#frontend-integration).
 
-Authenticated users can upload PDF resumes (5 MiB maximum), list/read their metadata, and delete unreferenced resources through `/resumes`. Binary is stored privately under generated keys, separate from PostgreSQL metadata. The `/app/resumes` management UI is available; extraction remains upcoming. See the [Resume contract](docs/resumes.md) for admission rules, ownership, compensation, and known crash/commit limitations, and [frontend behavior](docs/frontend-resumes.md) for confirmed writes and uncertain-result recovery.
+Authenticated users can upload PDF resumes (5 MiB maximum), list/read their metadata, and delete unreferenced resources through `/resumes`. Binary is stored privately under generated keys, separate from PostgreSQL metadata. Explicit `POST /resumes/{resume_id}/extract` uses base pypdf to save best-effort PDF source text internally and returns metadata only. Completed attempts return 200 with `extracted`, `text_unavailable`, or `extraction_failed`; no OCR, LLM, API key, or new environment configuration is required. The `/app/resumes` management UI remains upload/list/delete only, with an unknown-status fallback for extraction states. See the [Resume contract](docs/resumes.md) for lifecycle, resource/cancellation limits, ownership, and failure semantics, and [frontend behavior](docs/frontend-resumes.md) for confirmed writes and uncertain-result recovery.
 
 `TEST_DATABASE_URL` must name a separate database ending in `_test`. Database tests fail when it is missing or unavailable. Each test creates a random schema through Alembic, then removes only that schema. Do not point this setting at a database containing valuable data.
 

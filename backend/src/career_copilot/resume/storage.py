@@ -39,6 +39,8 @@ class ResumeStorage(Protocol):
         self, key: str, chunks: AsyncIterator[bytes], max_bytes: int
     ) -> StoredBinary: ...
 
+    async def read(self, key: str, max_bytes: int) -> bytes: ...
+
     async def delete(self, key: str) -> None: ...
 
 
@@ -186,6 +188,36 @@ class LocalResumeStorage:
                         "resume_storage_cleanup_failed operation=save key=%s", key
                     )
                     raise StorageUnavailable() from None
+
+    async def read(self, key: str, max_bytes: int) -> bytes:
+        target = self._path(key)
+
+        def read_binary() -> bytes:
+            self._check_directories()
+            descriptor = os.open(
+                target,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            )
+            try:
+                info = os.fstat(descriptor)
+                if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
+                    raise StorageUnavailable()
+                result = bytearray()
+                while len(result) <= max_bytes:
+                    chunk = os.read(
+                        descriptor, min(64 * 1024, max_bytes + 1 - len(result))
+                    )
+                    if not chunk:
+                        return bytes(result)
+                    result.extend(chunk)
+                raise StorageUnavailable()
+            finally:
+                os.close(descriptor)
+
+        try:
+            return await run_io(read_binary)
+        except OSError:
+            raise StorageUnavailable() from None
 
     async def delete(self, key: str) -> None:
         target = self._path(key)

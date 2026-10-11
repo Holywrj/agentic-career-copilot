@@ -820,7 +820,11 @@ def test_openapi_resumes_has_local_error_and_multipart_contract(auth_app):
     assert set(paths["/resumes"]) == {"get", "post"}
     assert set(paths["/resumes/{resume_id}"]) == {"get", "delete"}
     assert not any("download" in path for path in paths)
-    for path in ["/resumes", "/resumes/{resume_id}"]:
+    assert set(paths["/resumes/{resume_id}/extract"]) == {"post"}
+    action = paths["/resumes/{resume_id}/extract"]["post"]
+    assert "requestBody" not in action
+    assert set(action["responses"]) == {"200", "401", "404", "409", "422", "503"}
+    for path in ["/resumes", "/resumes/{resume_id}", "/resumes/{resume_id}/extract"]:
         for operation in paths[path].values():
             assert operation["security"] == [{"HTTPBearer": []}]
             assert operation["responses"]["422"]["content"]["application/json"][
@@ -863,11 +867,13 @@ async def test_invalidated_auth_never_reads_body_or_touches_resource(
     storage = auth_app.state.resume_storage
     monkeypatch.setattr(storage, "save", forbidden)
     monkeypatch.setattr(storage, "delete", forbidden)
+    monkeypatch.setattr(storage, "read", forbidden)
     for method, path in [
         ("POST", "/resumes"),
         ("GET", "/resumes"),
         ("GET", "/resumes/" + resource["id"]),
         ("DELETE", "/resumes/" + resource["id"]),
+        ("POST", "/resumes/" + resource["id"] + "/extract"),
     ]:
         error(
             await auth_client.request(method, path, headers=headers),
