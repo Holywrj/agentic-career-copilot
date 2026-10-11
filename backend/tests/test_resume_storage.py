@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import stat
 import threading
 from uuid import uuid4
 
@@ -24,6 +25,36 @@ async def chunks(*values):
 @pytest.fixture
 def storage(tmp_path):
     return LocalResumeStorage(tmp_path / "private")
+
+
+def test_new_directories_have_private_mode(tmp_path):
+    storage = LocalResumeStorage(tmp_path / "private")
+    for directory in (storage.root, storage.temporary):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+
+
+def test_existing_private_directories_are_accepted(tmp_path):
+    root = tmp_path / "private"
+    root.mkdir(mode=0o700)
+    (root / ".tmp").mkdir(mode=0o700)
+    storage = LocalResumeStorage(root)
+    assert storage.root == root
+    assert list(storage.temporary.iterdir()) == []
+
+
+@pytest.mark.parametrize("mode", [0o777, 0o770, 0o755, 0o750, 0o1700])
+@pytest.mark.parametrize("directory", ["root", "temporary"])
+def test_existing_insecure_directory_rejected_without_chmod(tmp_path, mode, directory):
+    root = tmp_path / "private"
+    root.mkdir(mode=0o700)
+    temporary = root / ".tmp"
+    temporary.mkdir(mode=0o700)
+    insecure = root if directory == "root" else temporary
+    insecure.chmod(mode)
+    with pytest.raises(StorageUnavailable) as error:
+        LocalResumeStorage(root)
+    assert str(error.value) == ""
+    assert stat.S_IMODE(insecure.stat().st_mode) == mode
 
 
 async def test_save_actual_bytes_private_modes_and_idempotent_delete(storage):

@@ -77,6 +77,7 @@ class LocalResumeStorage:
         try:
             self.root = root.resolve()
             self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._check_directory(self.root)
             self.temporary = self.root / ".tmp"
             self.temporary.mkdir(mode=0o700, exist_ok=True)
             self._check_directories()
@@ -88,8 +89,13 @@ class LocalResumeStorage:
 
     def _check_directories(self) -> None:
         for directory in (self.root, self.temporary):
-            if not stat.S_ISDIR(directory.lstat().st_mode):
-                raise StorageUnavailable()
+            self._check_directory(directory)
+
+    @staticmethod
+    def _check_directory(directory: Path) -> None:
+        mode = directory.lstat().st_mode
+        if not stat.S_ISDIR(mode) or stat.S_IMODE(mode) != 0o700:
+            raise StorageUnavailable()
 
     def _path(self, key: str) -> Path:
         if re.fullmatch(r"[0-9a-f]{32}", key) is None:

@@ -37,6 +37,8 @@ The example credentials are for local development only. Compose binds PostgreSQL
 
 The backend provides JSON registration/login and JWT Bearer authentication backed by PostgreSQL sessions. The [authentication contract](docs/authentication.md) describes the four endpoints, errors, and frontend integration.
 
+Resume storage root and its `.tmp` directory require exactly POSIX mode `0700`, including existing directories. Startup and storage operations reject insecure permissions with `resume_storage_unavailable`; they do not chmod operator directories. New storage directories use `0700`, and uploaded files use `0600`.
+
 Authenticated users can create, read, and replace their current CareerProfile through `POST`, `GET`, and `PUT /career-profile`. Profiles use user-confirmed summary, skill names, and target role names. Writes are owner-scoped and updates require an optimistic `expected_revision`; see the [Career Profile contract](docs/career-profile.md). The existing database schema supports this API without a new migration. The frontend editor preserves drafts through conflicts and uncertain write outcomes; see [frontend integration](docs/career-profile.md#frontend-integration).
 
 Authenticated users can upload PDF resumes (5 MiB maximum), list/read their metadata, and delete unreferenced resources through `/resumes`. Binary is stored privately under generated keys, separate from PostgreSQL metadata. Resume management UI and extraction remain upcoming. See the [Resume contract](docs/resumes.md) for admission rules, ownership, compensation, and known crash/commit limitations.

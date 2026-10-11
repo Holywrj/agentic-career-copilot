@@ -4,6 +4,7 @@ import logging
 import re
 from uuid import UUID, uuid4
 
+import anyio
 from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -106,7 +107,8 @@ async def get(owner_id: UUID, resume_id: UUID, db: AsyncSession) -> ResumeRespon
 async def remove(
     owner_id: UUID, resume_id: UUID, db: AsyncSession, storage: ResumeStorage
 ) -> None:
-    async with db.begin():
+    transaction = await db.begin()
+    try:
         key = await db.scalar(
             select(TABLE.c.storage_key)
             .where(TABLE.c.user_id == owner_id, TABLE.c.id == resume_id)
@@ -129,11 +131,30 @@ async def remove(
             ):
                 raise HTTPException(409, "resume_in_use") from None
             raise
+        # Honor cancellation while binary is still untouched, before handing
+        # sole session/transaction ownership to the protected operation below.
+        await anyio.lowlevel.checkpoint()
+    except BaseException:
+        await complete(transaction.rollback())
+        raise
+
+    async def delete_and_finish() -> None:
         try:
-            await storage.delete(key)
-        except StorageUnavailable:
-            logger.error(
-                "resume_storage_delete_failed operation=delete key=%s",
-                key if re.fullmatch(r"[0-9a-f]{32}", key) else "invalid",
-            )
+            try:
+                await storage.delete(key)
+            except StorageUnavailable:
+                logger.error(
+                    "resume_storage_delete_failed operation=delete key=%s",
+                    key if re.fullmatch(r"[0-9a-f]{32}", key) else "invalid",
+                )
+                raise
+            await transaction.commit()
+        except BaseException:
+            if db.in_transaction():
+                await transaction.rollback()
             raise
+
+    # Cancellation must wait for both unlink and transaction completion. There
+    # is no outer transaction context to roll back a successful child commit;
+    # the request dependency can close the session only after this child ends.
+    await complete(delete_and_finish())

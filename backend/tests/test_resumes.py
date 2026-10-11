@@ -2,14 +2,16 @@
 
 import asyncio
 import re
+import threading
 from io import BytesIO
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import event, func, select, text, update
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 from starlette.datastructures import UploadFile
 
 from career_copilot.db.models import (
@@ -22,7 +24,7 @@ from career_copilot.db.models import (
 )
 from career_copilot.db.session import create_session_factory
 from career_copilot.resume import service
-from career_copilot.resume.storage import StorageUnavailable
+from career_copilot.resume.storage import StorageUnavailable, run_io
 from career_copilot.resume.uploads import MAX_RESUME_BYTES, MAX_RESUME_REQUEST_BYTES
 
 pytestmark = pytest.mark.database
@@ -597,6 +599,132 @@ async def test_delete_storage_failure_rolls_back_and_retry_succeeds(
     assert (
         await auth_client.delete("/resumes/" + resource["id"], headers=headers)
     ).status_code == 204
+
+
+@pytest.mark.parametrize("cancellations", [1, 2])
+@pytest.mark.parametrize("phase", ["unlink", "commit"])
+async def test_cancelled_delete_finishes_binary_and_transaction_before_session_close(
+    auth_client, auth_app, db_engine, owner, monkeypatch, cancellations, phase
+):
+    headers = owner[1]
+    resource = (await upload(auth_client, headers)).json()
+    row = await row_for(db_engine, resource["id"])
+    binary = auth_app.state.resume_storage.root / row.storage_key
+    unlink_started, unlink_release = threading.Event(), threading.Event()
+    commit_started, commit_release = asyncio.Event(), asyncio.Event()
+    original_unlink = Path.unlink
+    original_commit = AsyncSessionTransaction.commit
+    original_close = AsyncSession.close
+    closed_with_transaction = []
+
+    def blocked_unlink(path, *args, **kwargs):
+        if path == binary and phase == "unlink":
+            unlink_started.set()
+            assert unlink_release.wait(5)
+        return original_unlink(path, *args, **kwargs)
+
+    async def blocked_commit(transaction):
+        if phase == "commit":
+            assert not binary.exists()
+            commit_started.set()
+            await commit_release.wait()
+        await original_commit(transaction)
+
+    async def checked_close(db):
+        closed_with_transaction.append(db.in_transaction())
+        await original_close(db)
+
+    monkeypatch.setattr(Path, "unlink", blocked_unlink)
+    monkeypatch.setattr(AsyncSessionTransaction, "commit", blocked_commit)
+    monkeypatch.setattr(AsyncSession, "close", checked_close)
+    tasks_before = asyncio.all_tasks()
+    task = asyncio.create_task(
+        auth_client.delete("/resumes/" + resource["id"], headers=headers)
+    )
+    try:
+        if phase == "unlink":
+            assert await asyncio.wait_for(run_io(unlink_started.wait, 5), 6)
+            assert binary.exists()
+        else:
+            await asyncio.wait_for(commit_started.wait(), 5)
+        assert db_engine.pool.checkedout() == 1
+        for _ in range(cancellations):
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+        unlink_release.set()
+        commit_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+    finally:
+        unlink_release.set()
+        commit_release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert not binary.exists()
+    assert await row_for(db_engine, resource["id"]) is None
+    assert closed_with_transaction and not any(closed_with_transaction)
+    assert db_engine.pool.checkedout() == 0
+    assert not (asyncio.all_tasks() - tasks_before)
+
+
+async def test_delete_cancellation_before_destructive_section_preserves_resource(
+    auth_client, auth_app, db_engine, owner, monkeypatch
+):
+    headers = owner[1]
+    resource = (await upload(auth_client, headers)).json()
+    row = await row_for(db_engine, resource["id"])
+    ready = asyncio.Event()
+    original = AsyncSession.execute
+
+    async def block_after_delete(db, statement, *args, **kwargs):
+        result = await original(db, statement, *args, **kwargs)
+        if str(statement).startswith("DELETE FROM resumes"):
+            ready.set()
+            await asyncio.Event().wait()
+        return result
+
+    monkeypatch.setattr(AsyncSession, "execute", block_after_delete)
+    task = asyncio.create_task(
+        auth_client.delete("/resumes/" + resource["id"], headers=headers)
+    )
+    try:
+        await asyncio.wait_for(ready.wait(), 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert (auth_app.state.resume_storage.root / row.storage_key).read_bytes() == PDF
+    assert await row_for(db_engine, resource["id"]) is not None
+    assert db_engine.pool.checkedout() == 0
+
+
+@pytest.mark.parametrize("directory", ["root", "temporary"])
+@pytest.mark.parametrize("operation", ["upload", "delete"])
+async def test_insecure_storage_directory_has_safe_http_error(
+    auth_client, auth_app, db_engine, owner, directory, operation
+):
+    headers = owner[1]
+    resource = (await upload(auth_client, headers)).json()
+    row = await row_for(db_engine, resource["id"])
+    storage = auth_app.state.resume_storage
+    insecure = storage.root if directory == "root" else storage.temporary
+    insecure.chmod(0o777)
+    try:
+        response = (
+            await upload(auth_client, headers)
+            if operation == "upload"
+            else await auth_client.delete("/resumes/" + resource["id"], headers=headers)
+        )
+        error(response, 503, "resume_storage_unavailable")
+        assert (storage.root / row.storage_key).read_bytes() == PDF
+        assert await row_for(db_engine, resource["id"]) is not None
+    finally:
+        insecure.chmod(0o700)
 
 
 async def test_delete_commit_failure_keeps_row_and_missing_binary_retry(

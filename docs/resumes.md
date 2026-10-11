@@ -99,8 +99,11 @@ commands from `backend/`, `./var/resumes` resolves to Git-ignored
 no directories/read no environment; Alembic requires only DATABASE_URL.
 
 Startup creates/checks root and `.tmp/`. New directories use 0700, files 0600.
-Existing directories must already be private and application-controlled; no
-recursive chmod or protection against privileged local attackers is promised.
+Both directories must have exactly POSIX mode 0700 (owner rwx, no group/other
+permissions or special bits). Existing insecure directories fail closed with
+`resume_storage_unavailable`; startup and storage operations validate the mode
+without changing operator permissions. Directories must be application-controlled;
+no recursive chmod or protection against privileged local attackers is promised.
 Keep root outside web/static paths. POSIX hard links and directory fsync are
 required (macOS/Linux). Local deployment needs persistent disk; independent
 ephemeral disks across instances are unsupported.
@@ -134,6 +137,15 @@ an idempotency receipt; V1 has no POST idempotency/deduplication.
 
 Delete: authenticate → owner-scoped SELECT FOR UPDATE in transaction → execute
 uncommitted DELETE to check foreign keys → unlink/fsync → commit → 204.
+Preparation is cancellable: cancellation before the destructive section rolls
+back the uncommitted DELETE and leaves binary untouched. At the handoff to
+storage deletion, a protected operation takes sole ownership of the session and
+transaction. Unlink/fsync and commit (or rollback on failure) finish before
+request cancellation propagates, including repeated task cancellation. The
+request closes its session only after that operation completes; cancellation
+after unlink alone cannot cause metadata rollback. Cancellation while awaiting
+commit is also deferred. A cancelled request may therefore have deleted the
+resource successfully without returning 204.
 Known references return 409 before touching binary, with no cascade. Storage
 failure rolls back metadata and returns 503, retaining key for retry. Binary may
 already be absent if unlink succeeded but fsync failed. Missing binary is an
@@ -144,7 +156,8 @@ remain pointing to a missing file. Retry DELETE completes cleanup, or returns 40
 if the first commit succeeded. Metadata reads do not probe disk. Future extraction
 must explicitly handle missing binary.
 
-Ordinary pre-COMMIT cancellation rolls back and attempts shielded cleanup.
+Upload cancellation before COMMIT rolls back and attempts shielded cleanup;
+upload cancellation during COMMIT retains binary on uncertainty as described above.
 Cleanup failure logs operation/key, without exception text, filenames, tokens,
 or paths. **Hard crash, process termination, cleanup failure, and unresolved
 uncertain commit can leave orphan binary or temporary files.** There is no
