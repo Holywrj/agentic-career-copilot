@@ -136,7 +136,9 @@ erDiagram
         uuid user_id FK
         uuid supersedes_resume_id FK
         text original_filename
-        text storage_key
+        text storage_key UK
+        text media_type
+        bigint size_bytes
         text parsing_status
         text extracted_text
         jsonb structured_content
@@ -213,6 +215,22 @@ The first private business API exposes the current User's singleton at `GET /car
 
 Creation starts at revision 1. PUT requires a strict positive `expected_revision` in the body and performs one atomic owner-and-revision-scoped UPDATE, increments revision, and explicitly sets `updated_at=clock_timestamp()`. A stale write returns `409 career_profile_conflict`; duplicate creation returns `409 career_profile_already_exists`. Each operation ends its explicit short transaction before returning, after the authentication dependency has already ended its own transaction. The response is validated inside the business transaction, and write responses are returned only after commit. No ETag protocol, automatic merge, history table, or RLS is introduced. See the [Career Profile contract](career-profile.md) for input normalization, responses, errors, and concurrency behavior.
 
+### Resume upload and storage foundation
+
+Resume metadata remains in PostgreSQL; binary uses a small ResumeStorage boundary
+with private local filesystem storage. Four owner-scoped endpoints provide upload,
+list, metadata read, and delete. PDF admission combines extension, MIME and signature;
+actual binary is limited to 5 MiB. Authentication precedes explicit multipart parsing,
+with ASGI request limits protecting spooling and chunked storage enforcing file size.
+
+Migration 0003 adds nullable media_type/size_bytes and unique storage_key. New uploads
+persist real metadata; legacy values remain null. File data and atomic publication
+are durable before INSERT. Confirmed DB rejection compensates by deleting binary;
+uncertain COMMIT retains it. Storage/delete failure preserves metadata for retry.
+Unlink followed by DB failure can leave a row without binary; hard crashes and
+cleanup failures can leave orphan files. No startup sweep or reconciliation command
+is introduced. See [Resume contract](resumes.md) for sequences and operational limits.
+
 ## Authentication Decision
 
 The current authentication implementation is:
@@ -277,9 +295,9 @@ The initial migration establishes the five core domain tables and the authentica
 
 CareerProfile uses `user_id` as its primary key, so a User can have zero or one Profile. Its V1 API validates and normalizes string arrays; this needs no new migration or string-element JSONB CHECK. Raw SQL writers can still produce arrays outside the V1 contract, which fail strict response validation without automatic repair. Analysis records retain a Profile revision and input snapshot rather than a foreign key to the mutable current Profile. Jobs require a nonblank JD but may omit title, company, and URL. Resume extraction and analysis output remain nullable until available. Their JSONB checks enforce basic object/array shape; full business payload schemas will be introduced with parsing and analysis features.
 
-User, Resume, and JobAnalysis records include required text status fields. Authentication now defines User statuses at the application layer as described above. Resume and JobAnalysis values, defaults, and lifecycle semantics remain for their corresponding feature work; the Database Foundation does not enforce those workflows.
+User, Resume, and JobAnalysis records include required text status fields. Authentication now defines User statuses at the application layer as described above. Resume uploads now use `parsing_status="uploaded"`, meaning saved original binary without extraction. Legacy statuses are preserved; no complex status CHECK is added. JobAnalysis lifecycle semantics remain for its feature work.
 
-Users, Profiles, Resumes, Jobs, and analyses have creation and update timestamps. SQLAlchemy maintains `updated_at` on mapped-table updates; CareerProfile replacement explicitly uses PostgreSQL `clock_timestamp()` instead of the shared `now()` expression. Revision, not time, controls concurrency. Raw SQL writers must set update timestamps explicitly. Authentication sessions use creation, expiration, and optional revocation timestamps instead. Migration `0002` adds LocalCredential with only `user_id` (primary key and User foreign key), `password_hash`, and `created_at`. Foreign keys do not automatically cascade deletions; deletion and retention workflows require a later explicit design.
+Users, Profiles, Resumes, Jobs, and analyses have creation and update timestamps. SQLAlchemy maintains `updated_at` on mapped-table updates; CareerProfile replacement explicitly uses PostgreSQL `clock_timestamp()` instead of the shared `now()` expression. Revision, not time, controls concurrency. Raw SQL writers must set update timestamps explicitly. Authentication sessions use creation, expiration, and optional revocation timestamps instead. Migration `0002` adds LocalCredential with only `user_id` (primary key and User foreign key), `password_hash`, and `created_at`. Foreign keys do not automatically cascade deletions; Resume deletion now locks the owned row, executes an uncommitted DELETE to check existing references, unlinks binary, then commits; referenced Resumes return 409 without cascade. Other retention workflows remain future work.
 
 Integration tests require a dedicated database with a name ending in `_test`, distinct from the application database. Tests migrate a generated schema and clean up only that schema. They verify migrations, constraints, async request cleanup, transaction rollback, cancellation, and independent concurrent sessions. CareerProfile tests additionally verify cross-user API authorization, concurrent create/update behavior, and a deterministic PostgreSQL CAS lock wait.
 

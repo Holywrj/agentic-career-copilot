@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
@@ -63,3 +64,17 @@ class AuthSettings:
         except ValueError:
             raise ValueError("JWT_SESSION_TTL_SECONDS must be an integer") from None
         return cls(jwt_secret=secret, session_ttl_seconds=ttl)
+
+
+@dataclass(frozen=True)
+class ResumeSettings:
+    """Application-only storage configuration; migrations need only the database."""
+
+    storage_dir: Path = field(repr=False)
+
+    @classmethod
+    def from_env(cls) -> "ResumeSettings":
+        value = os.environ.get("RESUME_STORAGE_DIR")
+        if not value or not value.strip():
+            raise ValueError("RESUME_STORAGE_DIR is required")
+        return cls(storage_dir=Path(value))
