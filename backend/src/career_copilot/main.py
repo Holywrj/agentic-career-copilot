@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from anyio import CapacityLimiter
 from fastapi import FastAPI
 
 from career_copilot.auth.middleware import AuthResponseMiddleware
@@ -12,6 +13,10 @@ from career_copilot.auth.tokens import TokenService
 from career_copilot.career_profile.middleware import CareerProfileResponseMiddleware
 from career_copilot.career_profile.router import router as career_profile_router
 from career_copilot.db.session import create_engine, create_session_factory
+from career_copilot.resume.extraction import (
+    EXTRACTION_CONCURRENCY,
+    suppress_parser_logging,
+)
 from career_copilot.resume.middleware import ResumeResponseMiddleware
 from career_copilot.resume.router import router as resume_router
 from career_copilot.resume.storage import LocalResumeStorage, ResumeStorage, run_io
@@ -36,6 +41,10 @@ def create_app(
         application.state.engine = engine
         application.state.session_factory = create_session_factory(engine)
         try:
+            suppress_parser_logging()
+            application.state.resume_extraction_limiter = CapacityLimiter(
+                EXTRACTION_CONCURRENCY
+            )
             application.state.resume_storage = (
                 resume_storage
                 if resume_storage is not None

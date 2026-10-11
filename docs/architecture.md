@@ -215,7 +215,7 @@ The first private business API exposes the current User's singleton at `GET /car
 
 Creation starts at revision 1. PUT requires a strict positive `expected_revision` in the body and performs one atomic owner-and-revision-scoped UPDATE, increments revision, and explicitly sets `updated_at=clock_timestamp()`. A stale write returns `409 career_profile_conflict`; duplicate creation returns `409 career_profile_already_exists`. Each operation ends its explicit short transaction before returning, after the authentication dependency has already ended its own transaction. The response is validated inside the business transaction, and write responses are returned only after commit. No ETag protocol, automatic merge, history table, or RLS is introduced. See the [Career Profile contract](career-profile.md) for input normalization, responses, errors, and concurrency behavior.
 
-### Resume upload and storage foundation
+### Resume upload, storage, and text extraction
 
 Resume metadata remains in PostgreSQL; binary uses a small ResumeStorage boundary
 with private local filesystem storage. Four owner-scoped endpoints provide upload,
@@ -230,6 +230,22 @@ uncertain COMMIT retains it. Storage/delete failure preserves metadata for retry
 Unlink followed by DB failure can leave a row without binary; hard crashes and
 cleanup failures can leave orphan files. No startup sweep or reconciliation command
 is introduced. See [Resume contract](resumes.md) for sequences and operational limits.
+
+An explicit fifth endpoint, `POST /resumes/{resume_id}/extract`, reads saved binary
+through `ResumeStorage.read` and runs strict pypdf source-text extraction in an
+owned worker thread. A dedicated two-pipeline limiter and cooperative resource
+policy bound processing; this is not hard CPU/RSS isolation. Short owner lookup
+and final recheck/update transactions surround processing without holding DB
+connections during read/parse. Concurrent cached success cannot be overwritten
+by later failure, and concurrent deletion never resurrects a resource.
+
+Completed attempts persist `extracted` with nonempty normalized text,
+`text_unavailable` with null text, or `extraction_failed` with null text, and return
+200 metadata only. Cached successful outcomes skip processing; failed attempts
+allow explicit retry. Protected final transaction ownership defers cancellation
+until commit/rollback ends. Source text stays internal and does not mutate
+CareerProfile, structured content, lineage, or historical analyses. No migration,
+OCR, LLM, provider configuration, or frontend extraction workflow is added.
 
 ## Authentication Decision
 

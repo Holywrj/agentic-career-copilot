@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import AsyncIterator
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,6 +11,8 @@ import pytest
 import pytest_asyncio
 from alembic import command
 from alembic.config import Config
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import Connection, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -18,6 +21,49 @@ from career_copilot import main
 from career_copilot.settings import AuthSettings, ResumeSettings, Settings
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def pdf_bytes():
+    """Tiny self-contained PDFs; no system fonts, renderer or network fixtures."""
+
+    def make(*pages, encrypted=False, content=None, compressed=False):
+        writer = PdfWriter()
+        for page_text in pages or ("Resume Engineer",):
+            page = writer.add_blank_page(width=612, height=792)
+            font = DictionaryObject(
+                {
+                    NameObject("/Type"): NameObject("/Font"),
+                    NameObject("/Subtype"): NameObject("/Type1"),
+                    NameObject("/BaseFont"): NameObject("/Helvetica"),
+                    NameObject("/Encoding"): NameObject("/WinAnsiEncoding"),
+                }
+            )
+            page[NameObject("/Resources")] = DictionaryObject(
+                {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})}
+            )
+            if page_text is not None or content is not None:
+                stream = DecodedStreamObject()
+                stream.set_data(
+                    content
+                    if content is not None
+                    else (
+                        b"BT /F1 12 Tf 36 700 Td <"
+                        + page_text.encode("cp1252").hex().encode()
+                        + b"> Tj ET"
+                    )
+                )
+                page[NameObject("/Contents")] = (
+                    stream.flate_encode() if compressed else stream
+                )
+        if encrypted:
+            writer.encrypt("test-only-password", algorithm="RC4-128")
+        output = BytesIO()
+        writer.write(output)
+        writer.close()
+        return output.getvalue()
+
+    return make
 
 
 @pytest.fixture
