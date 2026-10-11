@@ -36,7 +36,7 @@ The example credentials are for local development only. Compose binds PostgreSQL
 
 The backend provides JSON registration/login and JWT Bearer authentication backed by PostgreSQL sessions. The [authentication contract](docs/authentication.md) describes the four endpoints, errors, and frontend integration.
 
-Authenticated users can create, read, and replace their current CareerProfile through `POST`, `GET`, and `PUT /career-profile`. Profiles use user-confirmed summary, skill names, and target role names. Writes are owner-scoped and updates require an optimistic `expected_revision`; see the [Career Profile contract](docs/career-profile.md). The existing database schema supports this API without a new migration. Career Profile frontend forms are a later increment.
+Authenticated users can create, read, and replace their current CareerProfile through `POST`, `GET`, and `PUT /career-profile`. Profiles use user-confirmed summary, skill names, and target role names. Writes are owner-scoped and updates require an optimistic `expected_revision`; see the [Career Profile contract](docs/career-profile.md). The existing database schema supports this API without a new migration. The frontend editor preserves drafts through conflicts and uncertain write outcomes; see [frontend integration](docs/career-profile.md#frontend-integration).
 
 `TEST_DATABASE_URL` must name a separate database ending in `_test`. Database tests fail when it is missing or unavailable. Each test creates a random schema through Alembic, then removes only that schema. Do not point this setting at a database containing valuable data.
 
@@ -69,7 +69,7 @@ npm run test
 npm run build
 ```
 
-Start the backend in a separate terminal using the backend instructions above (including `alembic upgrade head`). Open the URL printed by Vite, normally `http://localhost:5173`. Registration creates an account; sign in afterward to enter `/app`, the protected workspace shell. Career features are marked as upcoming. The interface defaults to Simplified Chinese; use the browser’s built-in page translation for another language. No in-app language switch or translation service is included.
+Start the backend in a separate terminal using the backend instructions above (including `alembic upgrade head`). Open the URL printed by Vite, normally `http://localhost:5173`. Registration creates an account; sign in afterward to enter `/app`, the protected workspace. Its Career Profile card opens `/app/profile` to create or edit your career summary, skills, and target roles. Resume, Jobs, and Job Analysis remain upcoming. The interface defaults to Simplified Chinese; use the browser’s built-in page translation for another language. No in-app language switch or translation service is included.
 
 Frontend requests use relative `/api/*` paths. Vite proxies them to `http://127.0.0.1:8000` and removes `/api`, so `/api/auth/login` reaches backend `/auth/login`. This development model needs no backend CORS configuration. The proxy exists only in development: production hosting must provide the same `/api/*` routing/rewrite over HTTPS and serve `index.html` for frontend deep links, without rewriting API errors to HTML.
 

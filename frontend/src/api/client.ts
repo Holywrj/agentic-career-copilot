@@ -4,6 +4,10 @@ export type ErrorKind =
   | 'username_unavailable'
   | 'authentication_required'
   | 'authentication_unavailable'
+  | 'career_profile_not_found'
+  | 'career_profile_already_exists'
+  | 'career_profile_conflict'
+  | 'career_profile_unavailable'
   | 'network_failure'
   | 'unexpected_server_error'
   | 'invalid_response'
@@ -17,6 +21,10 @@ export type BackendCode =
   | 'username_unavailable'
   | 'authentication_required'
   | 'authentication_unavailable'
+  | 'career_profile_not_found'
+  | 'career_profile_already_exists'
+  | 'career_profile_conflict'
+  | 'career_profile_unavailable'
 
 export class ApiError extends Error {
   readonly kind: ErrorKind
@@ -67,6 +75,10 @@ function httpError(status: number, payload: unknown): ApiError {
   if (status === 401 && detail === 'invalid_credentials') return new ApiError('invalid_credentials', status, detail)
   if (status === 401 && detail === 'authentication_required') return new ApiError('authentication_required', status, detail)
   if (status === 503 && detail === 'authentication_unavailable') return new ApiError('authentication_unavailable', status, detail)
+  if (status === 404 && detail === 'career_profile_not_found') return new ApiError('career_profile_not_found', status, detail)
+  if (status === 409 && detail === 'career_profile_already_exists') return new ApiError('career_profile_already_exists', status, detail)
+  if (status === 409 && detail === 'career_profile_conflict') return new ApiError('career_profile_conflict', status, detail)
+  if (status === 503 && detail === 'career_profile_unavailable') return new ApiError('career_profile_unavailable', status, detail)
   return new ApiError('unexpected_server_error', status)
 }
 

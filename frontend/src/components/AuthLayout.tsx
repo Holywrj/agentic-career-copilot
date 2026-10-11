@@ -27,7 +27,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
             把你的经历、目标与机会汇聚在这里，一起规划职业的下一步。
           </p>
           <div className="product-preview">
-            <p className="preview-label">功能预览 <span>· 即将推出</span></p>
+            <p className="preview-label">功能预览 <span>· 持续完善中</span></p>
             <div className="preview-grid">
               <div className="preview-card">
                 <span className="preview-symbol" aria-hidden="true">◎</span>

@@ -1,8 +1,8 @@
 import { useAuth } from '../auth/AuthContext'
 import { Brand } from '../components/AuthLayout'
+import { Link } from 'react-router'
 
 const upcoming = [
-  ['01', '职业档案', '梳理你的经历、优势与目标，为下一步打好基础。'],
   ['02', '简历', '整理职业经历，在这里持续完善你的简历。'],
   ['03', '收藏岗位', '收集值得探索的岗位，不错过心仪的机会。'],
   ['04', '岗位分析', '分析岗位匹配度和技能差距，找到有依据的行动方向。'],
@@ -26,16 +26,22 @@ export function WorkspacePage() {
           <p className="eyebrow">你的职业工作台</p>
           <h1 id="page-title" tabIndex={-1}>在这里，<br /><span>开启下一程。</span></h1>
           <p className="story-description">
-            欢迎来到 Career Copilot。你的工作台已就绪，帮助你规划下一步的工具正在逐步完善。
+            欢迎来到 Career Copilot。从职业档案开始，梳理经历、优势与目标，规划你的下一步。
           </p>
           <p className="workspace-status">账号状态：{currentUser?.status === 'active' ? '正常' : '—'}</p>
         </section>
         <section className="upcoming-section" aria-labelledby="upcoming-title">
           <div className="section-heading">
-            <h2 id="upcoming-title">正在构建的功能</h2>
-            <span>功能预告</span>
+            <h2 id="upcoming-title">职业工具</h2>
+            <span>从职业档案开始</span>
           </div>
           <div className="upcoming-grid">
+            <article className="upcoming-card profile-feature-card">
+              <div className="card-topline"><span className="card-number">01</span><span className="coming-label">已开放</span></div>
+              <h3>职业档案</h3>
+              <p>梳理你的经历、优势与目标，为下一步打好基础。</p>
+              <Link className="button secondary" to="/app/profile">查看职业档案</Link>
+            </article>
             {upcoming.map(([number, title, description]) => (
               <article className="upcoming-card" key={title}>
                 <div className="card-topline">
