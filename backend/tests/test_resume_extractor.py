@@ -3,10 +3,11 @@
 import asyncio
 import logging
 import threading
+from io import BytesIO
 
 import anyio
 import pytest
-from pypdf import PdfReader, get_configuration
+from pypdf import PdfReader, apply_configuration, get_configuration
 
 from career_copilot.resume import extraction
 from career_copilot.resume.extraction import (
@@ -90,6 +91,52 @@ def test_compressed_stream_amplification_is_bounded(pdf_bytes):
     result = extract_pdf_text(binary)
     assert result.status == "extraction_failed" and result.text is None
     assert result.reason == "decoder_limit"
+
+
+@pytest.mark.parametrize("invocations", [999, 1000, 1001])
+def test_real_form_xobject_boundary_never_persists_library_skipped_prefix(
+    form_pdf_bytes, invocations
+):
+    binary = form_pdf_bytes(invocations)
+    # Confirm the actual library limit silently returns a usable partial prefix.
+    # The application must detect its exceeded policy independently of logging.
+    with apply_configuration(extraction.PARSER_CONFIGURATION):
+        with PdfReader(BytesIO(binary), strict=True) as reader:
+            raw = reader.pages[0].extract_text()
+    assert raw.startswith("PREFIX")
+    assert raw.count("FORM_SOURCE") == min(invocations, 1000)
+    result = extract_pdf_text(binary)
+    if invocations <= 1000:
+        assert result.status == "extracted" and result.reason is None
+        assert result.text.count("FORM_SOURCE") == invocations
+    else:
+        assert result.status == "extraction_failed" and result.reason == "decoder_limit"
+        assert result.text is None
+
+
+@pytest.mark.parametrize("limit,status", [(2, "extracted"), (1, "extraction_failed")])
+def test_nested_form_operations_share_persistent_policy_flag(
+    form_pdf_bytes, monkeypatch, limit, status
+):
+    monkeypatch.setattr(extraction, "MAX_XOBJECT_OPERATIONS", limit)
+    result = extract_pdf_text(form_pdf_bytes(1, nested=True))
+    assert result.status == status
+    if status == "extracted":
+        assert result.text == "PREFIX\nFORM_SOURCE"
+    else:
+        assert result.reason == "decoder_limit" and result.text is None
+
+
+@pytest.mark.parametrize(
+    "counts,status", [((500, 500), "extracted"), ((500, 501), "extraction_failed")]
+)
+def test_xobject_policy_accumulates_across_real_pages(form_pdf_bytes, counts, status):
+    result = extract_pdf_text(form_pdf_bytes(*counts))
+    assert result.status == status
+    if status == "extracted":
+        assert result.text.count("FORM_SOURCE") == sum(counts)
+    else:
+        assert result.reason == "decoder_limit" and result.text is None
 
 
 @pytest.mark.parametrize(

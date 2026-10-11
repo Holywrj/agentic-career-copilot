@@ -153,3 +153,79 @@ async def auth_client(auth_app):
         transport=transport, base_url="http://test"
     ) as client:
         yield client
+
+
+@pytest.fixture
+def form_pdf_bytes():
+    """Tiny real PDFs with shared Form streams, nested Forms and valid xrefs."""
+
+    def stream(data, attributes=b""):
+        return (
+            b"<< /Length "
+            + str(len(data)).encode()
+            + b" "
+            + attributes
+            + b" >>\nstream\n"
+            + data
+            + b"\nendstream"
+        )
+
+    def make(*counts, nested=False):
+        counts = counts or (1,)
+        form_attributes = b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] "
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"",  # Page tree is filled after page IDs are known.
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            stream(
+                b"BT /F1 12 Tf 36 700 Td (FORM_SOURCE) Tj ET",
+                form_attributes + b"/Resources << /Font << /F1 3 0 R >> >>",
+            ),
+        ]
+        form_id = 4
+        if nested:
+            objects.append(
+                stream(
+                    b"/Leaf Do",
+                    form_attributes + b"/Resources << /XObject << /Leaf 4 0 R >> >>",
+                )
+            )
+            form_id = 5
+        pages = []
+        for count in counts:
+            page_id = len(objects) + 1
+            pages.append(f"{page_id} 0 R")
+            objects.append(
+                (
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    "/Resources << /Font << /F1 3 0 R >> "
+                    f"/XObject << /Form {form_id} 0 R >> >> "
+                    f"/Contents {page_id + 1} 0 R >>"
+                ).encode()
+            )
+            objects.append(
+                stream(
+                    b"BT /F1 12 Tf 36 700 Td (PREFIX) Tj ET\n" + b"/Form Do\n" * count
+                )
+            )
+        objects[1] = (
+            f"<< /Type /Pages /Count {len(pages)} /Kids [{' '.join(pages)}] >>"
+        ).encode()
+        binary = bytearray(b"%PDF-1.7\n")
+        offsets = []
+        for number, obj in enumerate(objects, 1):
+            offsets.append(len(binary))
+            binary.extend(f"{number} 0 obj\n".encode() + obj + b"\nendobj\n")
+        xref = len(binary)
+        binary.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode())
+        for offset in offsets:
+            binary.extend(f"{offset:010d} 00000 n \n".encode())
+        binary.extend(
+            (
+                f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+                f"startxref\n{xref}\n%%EOF\n"
+            ).encode()
+        )
+        return bytes(binary)
+
+    return make

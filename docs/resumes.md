@@ -200,11 +200,21 @@ Code-level V1 policy bounds short resume processing without adding env settings:
 Scoped public `apply_configuration(Configuration(...))` sets declared stream
 length to 5 MiB; decoder output/array/image buffers to 4 MiB; filters per stream
 to 8; decoding work to **16 MiB per stream**; page-tree entries/depth to 1000/20;
-and XForm invocations per extraction to 1000. Stream/tree limits allow ordinary
-font/layout overhead while rejecting amplification or excessive traversal.
+and the library-side Form invocation bound to 1000. Stream/tree limits allow
+ordinary font/layout overhead while rejecting amplification or excessive traversal.
 `jbig2dec_binary=None` prevents an external decoder. There is no custom
 whole-document content counter, private-object traversal, or double decoding.
 Policies fail the attempt rather than silently truncating text.
+
+An extraction-local public `visitor_operand_before` counts `Do` operations
+across all pages and nested Forms, with a **1000 XObject operation** limit.
+Image XObjects also count as a conservative work policy. The visitor retains
+an exceeded flag, checked after each `extract_text()` returns: pypdf can catch
+nested callback exceptions and its Form limit can silently skip content.
+Exceeding this policy fails the whole attempt as `extraction_failed` with null
+text, so a known resource-limited prefix is never saved as `extracted`.
+General PDF semantics can still make best-effort extraction incomplete; ordinary
+parser warnings alone remain insufficient to fail an attempt.
 
 The time budget is cooperative, not a hard timeout: one third-party parser call
 can exceed it before the next checkpoint. There is **no hard CPU or RSS

@@ -38,6 +38,7 @@ async def attempt(client, headers, resource):
         ("encrypted", "extraction_failed", None),
         ("page_limit", "extraction_failed", None),
         ("decoder_limit", "extraction_failed", None),
+        ("xobject_limit", "extraction_failed", None),
     ],
 )
 async def test_document_outcomes_are_committed_200_metadata(
@@ -46,6 +47,7 @@ async def test_document_outcomes_are_committed_200_metadata(
     db_engine,
     owner,
     pdf_bytes,
+    form_pdf_bytes,
     document,
     status,
     expected,
@@ -61,6 +63,7 @@ async def test_document_outcomes_are_committed_200_metadata(
         "decoder_limit": lambda: pdf_bytes(
             content=b" " * (extraction.MAX_DECODED_STREAM_BYTES + 1), compressed=True
         ),
+        "xobject_limit": lambda: form_pdf_bytes(1001),
     }
     binary = binaries[document]()
     resource = (
@@ -116,6 +119,9 @@ async def test_document_outcomes_are_committed_200_metadata(
         assert (
             f"resume_id={row.id}" in caplog.text and "operation=extract" in caplog.text
         )
+    if document == "xobject_limit":
+        assert row.extracted_text is None and "reason=decoder_limit" in caplog.text
+        assert "PREFIX" not in caplog.text and "FORM_SOURCE" not in caplog.text
 
 
 @pytest.mark.parametrize("no_text", [False, True])

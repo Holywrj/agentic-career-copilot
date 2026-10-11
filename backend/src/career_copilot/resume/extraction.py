@@ -25,7 +25,7 @@ MAX_STREAM_WORK_BYTES = 16 * 1024 * 1024
 MAX_STREAM_FILTERS = 8
 MAX_PAGE_TREE_ENTRIES = 1000
 MAX_PAGE_TREE_DEPTH = 20
-MAX_XFORM_INVOCATIONS = 1000
+MAX_XOBJECT_OPERATIONS = 1000
 PARSER_CONFIGURATION = Configuration(
     maximum_declared_stream_length=MAX_RESUME_BYTES,
     array_based_stream_maximum_output_length=MAX_DECODED_STREAM_BYTES,
@@ -39,7 +39,7 @@ PARSER_CONFIGURATION = Configuration(
     stream_decoding_work_maximum_length=MAX_STREAM_WORK_BYTES,
     page_tree_maximum_entries=MAX_PAGE_TREE_ENTRIES,
     page_tree_maximum_depth=MAX_PAGE_TREE_DEPTH,
-    xform_maximum_invocations_per_extraction=MAX_XFORM_INVOCATIONS,
+    xform_maximum_invocations_per_extraction=MAX_XOBJECT_OPERATIONS,
     jbig2dec_binary=None,
 )
 FailureReason = Literal[
@@ -91,6 +91,17 @@ def normalize_page(text: str) -> str:
 
 def extract_pdf_text(binary: bytes) -> ExtractionResult:
     deadline = time.monotonic() + PARSER_BUDGET_SECONDS
+    xobject_operations = 0
+    policy_exceeded = False
+
+    def visit_operand(operator, _operands, _cm, _tm) -> None:
+        nonlocal xobject_operations, policy_exceeded
+        if operator == b"Do":
+            xobject_operations += 1
+            if xobject_operations > MAX_XOBJECT_OPERATIONS:
+                # Nested Form extraction may catch callback exceptions, and the
+                # library's Form limit silently skips content. Keep a flag instead.
+                policy_exceeded = True
 
     def checkpoint() -> None:
         if time.monotonic() >= deadline:
@@ -112,7 +123,9 @@ def extract_pdf_text(binary: bytes) -> ExtractionResult:
                 pages = []
                 for page in reader.pages:
                     checkpoint()
-                    raw = page.extract_text()
+                    raw = page.extract_text(visitor_operand_before=visit_operand)
+                    if policy_exceeded:
+                        raise PolicyFailure("decoder_limit")
                     checkpoint()
                     # Encoding is strict: invalid Unicode cannot reach PostgreSQL.
                     raw_size += len(raw.encode("utf-8"))
