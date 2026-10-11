@@ -48,6 +48,7 @@ export function CareerProfilePage() {
   const [recovery, setRecovery] = useState<Recovery | null>(null)
   const [skillEntry, setSkillEntry] = useState('')
   const [roleEntry, setRoleEntry] = useState('')
+  const [listResetKey, setListResetKey] = useState(0)
   const operation = useRef<AbortController | null>(null)
 
   // Controller identity guards late results even when an underlying requester
@@ -92,7 +93,10 @@ export function CareerProfilePage() {
       let latest: CareerProfile | null
       try { latest = await getCareerProfile(requestAuthenticated, active.signal) }
       catch (failure) { if (isMissing(failure)) latest = null; else throw failure }
-      if (operation.current === active && !active.signal.aborted) setRecovery({ reason, status: 'ready', latest, error: null })
+      if (operation.current === active && !active.signal.aborted) {
+        setRecovery({ reason, status: 'ready', latest, error: null })
+        setError(null)
+      }
     } catch (failure) {
       if (operation.current === active && !active.signal.aborted && !isCancelled(failure)) {
         setRecovery({ reason, status: 'failed', latest: null, error: careerProfileErrorMessage(failure) })
@@ -147,7 +151,11 @@ export function CareerProfilePage() {
     if (!keepDraft && (dirty || hasEntry) && !window.confirm('使用服务器状态会替换当前草稿和未添加的列表输入，确定继续？')) return
     const latest = recovery.latest
     setEditor({ canonical: latest, draft: keepDraft ? editor.draft : toDraft(latest) })
-    if (!keepDraft) { setSkillEntry(''); setRoleEntry('') }
+    if (!keepDraft) {
+      setSkillEntry(''); setRoleEntry('')
+      // Reset the list editors' local validation and announcement state too.
+      setListResetKey((current) => current + 1)
+    }
     setRecovery(null)
     setError(null)
     setSuccess(keepDraft
@@ -213,9 +221,9 @@ export function CareerProfilePage() {
             <p id="summary-help" className="field-help">描述你的职业背景、经验概述与职业方向。最多 2000 个 Unicode 字符，最终校验以服务器为准。</p>
             <p id="summary-count" className="field-help">规范化后字符数：{summaryCount} / 2000</p>
           </div>
-          <StringListEditor id="profile-skills" label="技能" values={editor.draft.skills} entry={skillEntry}
+          <StringListEditor key={`skills-${listResetKey}`} id="profile-skills" label="技能" values={editor.draft.skills} entry={skillEntry}
             onEntryChange={(value) => { setSkillEntry(value); setSuccess(null) }} onChange={(skills) => edit({ skills })} maxItems={100} maxLength={80} disabled={pending} />
-          <StringListEditor id="profile-roles" label="目标岗位" values={editor.draft.roles} entry={roleEntry}
+          <StringListEditor key={`roles-${listResetKey}`} id="profile-roles" label="目标岗位" values={editor.draft.roles} entry={roleEntry}
             onEntryChange={(value) => { setRoleEntry(value); setSuccess(null) }} onChange={(roles) => edit({ roles })} maxItems={10} maxLength={120} disabled={pending} />
           <div aria-live="assertive" aria-atomic="true">{error && <p className="notice error" id="profile-error">{error}</p>}</div>
           <div aria-live="polite" aria-atomic="true">{success && <p className="notice success">{success}</p>}</div>

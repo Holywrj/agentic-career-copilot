@@ -127,6 +127,31 @@ test('keyboard adds and removes skills and target roles without submitting the p
   expect(screen.getByRole('button', { name: '保存档案' }).hasAttribute('disabled')).toBe(true)
 })
 
+test.each(['技能', '目标岗位'])('IME composition Enter does not add %s or submit Profile; Enter after composition adds once', async (label) => {
+  renderPage(); await loaded()
+  const input = screen.getByLabelText(`添加${label}`)
+  const list = screen.getByRole('list', { name: `已添加的${label}` })
+  const originalCount = within(list).getAllByRole('listitem').length
+  input.focus()
+  fireEvent.compositionStart(input)
+  fireEvent.change(input, { target: { value: '中文候选' } })
+  fireEvent.compositionUpdate(input, { data: '中文候选' })
+  fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', isComposing: true })
+  fireEvent.keyUp(input, { key: 'Enter', code: 'Enter', isComposing: true })
+  expect(within(list).getAllByRole('listitem')).toHaveLength(originalCount)
+  expect((input as HTMLInputElement).value).toBe('中文候选')
+  expect(writeCalls('POST')).toHaveLength(0)
+  expect(writeCalls('PUT')).toHaveLength(0)
+
+  fireEvent.compositionEnd(input, { data: '中文候选' })
+  await userEvent.setup().keyboard('{Enter}')
+  expect(within(list).getAllByRole('listitem')).toHaveLength(originalCount + 1)
+  expect(screen.getByRole('button', { name: `删除${label} 中文候选` })).toBeTruthy()
+  expect((input as HTMLInputElement).value).toBe('')
+  expect(writeCalls('POST')).toHaveLength(0)
+  expect(writeCalls('PUT')).toHaveLength(0)
+})
+
 test('PUT explicitly clears summary and both lists', async () => {
   const user = userEvent.setup()
   renderPage(); await loaded()
@@ -290,6 +315,32 @@ test('server reset is explicit, cancellable, clears entries, and disables unchan
   expect(writeCalls('PUT')).toHaveLength(1)
 })
 
+test.each(['conflict', 'uncertain'])('server reset clears both list editors local errors after %s recovery', async (reason) => {
+  const user = userEvent.setup()
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  renderPage(); await loaded(); changeSummary()
+  if (reason === 'conflict') fetchMock.mockImplementationOnce(async () => json({ detail: 'career_profile_conflict' }, 409))
+  else fetchMock.mockRejectedValueOnce(new TypeError('lost write response'))
+  fetchMock.mockImplementationOnce(async () => json({ ...PROFILE, revision: 7 }))
+  fireEvent.submit(screen.getByRole('form')); await expectLatest(7)
+  for (const [label, limit] of [['技能', 80], ['目标岗位', 120]] as const) {
+    const input = screen.getByLabelText(`添加${label}`)
+    fireEvent.change(input, { target: { value: '字'.repeat(limit + 1) } })
+    await user.click(screen.getByRole('button', { name: `添加${label}` }))
+    expect(screen.getByText(`请输入单行${label}，每项 1–${limit} 个 Unicode 字符，不能包含控制字符。`)).toBeTruthy()
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+  }
+  await user.click(screen.getByRole('button', { name: '使用服务器状态重新编辑' }))
+  for (const label of ['技能', '目标岗位']) {
+    const input = screen.getByLabelText(`添加${label}`)
+    expect((input as HTMLInputElement).value).toBe('')
+    expect(input.getAttribute('aria-invalid')).toBe('false')
+    expect(input.getAttribute('aria-describedby')).not.toContain('-error')
+  }
+  expect(screen.queryByText(/请输入单行/)).toBeNull()
+  expect(writeCalls('PUT')).toHaveLength(1)
+})
+
 test('POST already-exists refreshes latest but never silently replaces the draft or repeats POST', async () => {
   fetchMock.mockImplementation(async () => json({ detail: 'career_profile_not_found' }, 404))
   renderPage(); await screen.findByRole('button', { name: '创建档案' }); changeSummary()
@@ -314,6 +365,8 @@ test.each([
   const before = fetchMock.mock.calls.length
   fetchMock.mockImplementationOnce(response).mockImplementationOnce(async () => json({ ...PROFILE, revision: 8, career_summary: '其他请求的内容' }))
   fireEvent.submit(screen.getByRole('form')); await expectLatest(8)
+  expect(document.getElementById('profile-error')).toBeNull()
+  expect(screen.getByRole('form').getAttribute('aria-describedby')).toBeNull()
   expect((screen.getByLabelText('职业概述') as HTMLTextAreaElement).value).toBe('我正在编辑的草稿')
   expect(screen.getByText(/写入结果不确定.*不能证明刚才保存成功/)).toBeTruthy()
   expect(screen.queryByText('职业档案已保存，当前显示服务器确认的数据。')).toBeNull()
@@ -385,11 +438,15 @@ test('uncertain write with failed reconciliation remains blocked and retry never
     .mockImplementationOnce(async () => json({ detail: 'career_profile_unavailable' }, 503))
   fireEvent.submit(screen.getByRole('form'))
   const retry = await screen.findByRole('button', { name: '重新读取服务器档案' })
+  expect(within(recoveryPanel()).getByRole('alert').textContent).toContain('职业档案服务暂时不可用')
   expect((screen.getByLabelText('职业概述') as HTMLTextAreaElement).value).toBe('我正在编辑的草稿')
   expect(screen.getByRole('button', { name: '保存档案' }).hasAttribute('disabled')).toBe(true)
   const before = fetchMock.mock.calls.length
   fetchMock.mockImplementationOnce(async () => json({ ...PROFILE, revision: 4 }))
   await userEvent.setup().click(retry); await expectLatest(4)
+  expect(document.getElementById('profile-error')).toBeNull()
+  expect(within(recoveryPanel()).queryByRole('alert')).toBeNull()
+  expect(screen.getByText(/写入结果不确定.*不能证明刚才保存成功/)).toBeTruthy()
   expect(fetchMock.mock.calls.slice(before).map(([, init]) => init?.method)).toEqual(['GET'])
   expect(writeCalls('PUT')).toHaveLength(1)
   expect(screen.queryByText('职业档案已保存，当前显示服务器确认的数据。')).toBeNull()
